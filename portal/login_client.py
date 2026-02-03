@@ -20,7 +20,7 @@ class PortalLoginClient:
             login_url = f"{self.base_url}/login"
             response = self.session.get(login_url, timeout=10)
             
-            if response.status_code != 200 or "Server is not available" in response.text:
+            if response.status_code != 200 or "Server is not available" in response.text or "The service is unavailable." in response.text:
                 return "PORTAL_DOWN"
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -78,3 +78,15 @@ class PortalLoginClient:
         except Exception as e:
             logger.error(f"Error fetching assessment detail: {e}")
             return None
+
+    def close(self):
+        """Close the session to prevent resource leaks"""
+        if self.session:
+            self.session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False

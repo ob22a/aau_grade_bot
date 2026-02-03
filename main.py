@@ -36,6 +36,7 @@ async def main():
         CRON_SECRET = os.getenv("CRON_SECRET", "default_secret_123")
 
         async def health_check(request):
+            logger.info(f"Health check from {request.remote}")
             return web.Response(text="OK", status=200)
 
         async def cron_trigger(request):

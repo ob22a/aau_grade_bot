@@ -68,6 +68,7 @@ async def run_check_all_grades():
             
             # Try potential canaries until one succeeds or we run out
             for pc in potential_canaries:
+                pc_client = None
                 try:
                     password = await user_service.get_decrypted_password(pc)
                     if not password: continue
@@ -85,13 +86,18 @@ async def run_check_all_grades():
                         await db.commit()
                         await notification_service.send_notification(pc.telegram_id, "⚠️ Background check failed: **Invalid Portal Credentials**. Background checking is now **suspended** for your account. Please update your password using /my_data to resume tracking.")
                         logger.warning(f"Canary {pc.university_id} had bad credentials, moving to next candidate.")
+                        pc_client.close()
                     elif pc_status == "PORTAL_DOWN":
+                        if pc_client:
+                            pc_client.close()
                         # If portal is actually down, we stop the whole group check and retry later
                         raise PortalDownException("Portal is down for canary candidate")
                 except PortalDownException:
                     raise
                 except Exception as e:
                     logger.error(f"Error checking candidate canary {pc.university_id}: {e}")
+                    if pc_client:
+                        pc_client.close()
                     continue
 
             if not canary_user:
@@ -246,8 +252,17 @@ async def run_check_all_grades():
                             await notification_service.send_notification(u.telegram_id, "⚠️ Background check failed: **Invalid Portal Credentials**. Background checking is now **suspended** for your account. Please update your password using /my_data to resume tracking.")
                 
                 await db.commit()
+            except PortalDownException:
+                logger.warning(f"Portal down for group {dept_id}, will retry on next cron")
+                # Clean up portal client if it exists
+                if portal_client:
+                    portal_client.close()
+                continue
             except Exception as e:
                 logger.error(f"Error checking group {dept_id}: {e}")
+                # Clean up portal client if it exists
+                if portal_client:
+                    portal_client.close()
         
         await audit_service.log("CRON_GRADE_CHECK_END", source="system")
         await db.commit()
@@ -272,6 +287,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
         retry_delays = [120, 300, 600]  # 2 min, 5 min, 10 min
         
         for attempt in range(max_retries):
+            portal_client = None
             try:
                 portal_client = PortalLoginClient()
                 logger.info(f"⏳ Attempting portal login for {user.university_id}... (Attempt {attempt + 1}/{max_retries})")
@@ -335,16 +351,19 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                         else:
                             await notification_service.send_notification(telegram_id, f"✅ Portal check finished. Applied {updates_found} updates.")
                     
-                    # Success - break out of retry loop
+                    # Success - cleanup and break out of retry loop
+                    portal_client.close()
                     break
                 
                 elif login_status == "BAD_CREDENTIALS":
                     user.is_credential_valid = False
                     await db.commit()
                     await notification_service.send_notification(telegram_id, "❌ **Login failed!** Your portal credentials appear to be incorrect.\n\nBackground checking has been **suspended**. Please update them using /my_data.")
+                    portal_client.close()
                     break  # Don't retry for bad credentials
                 
                 else:  # PORTAL_DOWN
+                    portal_client.close()
                     if attempt < max_retries - 1:
                         delay = retry_delays[attempt]
                         logger.warning(f"Portal down. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
@@ -356,6 +375,8 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                         
             except Exception as e:
                 logger.error(f"Unexpected error during grade check: {e}")
+                if portal_client:
+                    portal_client.close()
                 if attempt == max_retries - 1:
                     await notification_service.send_notification(telegram_id, f"❌ An error occurred while checking grades: {str(e)}")
                 break
