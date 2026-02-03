@@ -17,6 +17,7 @@ class RegistrationState(StatesGroup):
     waiting_for_password = State()
     waiting_for_department = State()
     waiting_for_uni_id = State() # For updates
+    waiting_for_dept_update = State() # For department updates
 
 class UpdateState(StatesGroup):
     waiting_for_year = State()
@@ -39,7 +40,7 @@ async def cmd_start(message: Message, state: FSMContext):
                 f"Logged in as: `{user.university_id}`\n"
                 f"Department: `{user.department_id}`\n"
                 f"Status: `{user.academic_year}, {user.semester}`\n\n"
-                "You can use the buttons below or /check_grades and /my_data commands.",
+                r"You can use the buttons below or /check\_grades and /my\_data commands.",
                 reply_markup=kb,
                 parse_mode="Markdown"
             )
@@ -130,6 +131,7 @@ async def cmd_my_data(message: Message, user_id: int = None):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🆔 Change University ID", callback_data="change_uni_id")],
             [InlineKeyboardButton(text="🔄 Change Password", callback_data="change_password")],
+            [InlineKeyboardButton(text="🏫 Change Department", callback_data="change_department")],
             [InlineKeyboardButton(text="📅 Change Year", callback_data="change_year"), InlineKeyboardButton(text="⏳ Change Semester", callback_data="change_sem")]
         ])
         
@@ -175,6 +177,29 @@ async def cb_change_password(callback: CallbackQuery, state: FSMContext):
         await AuditService(db).log("CHANGE_PASSWORD_START", callback.from_user.id)
         await db.commit()
     await callback.answer()
+
+@router.callback_query(F.data == "change_department")
+async def cb_change_department(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer(
+        "Please enter your **Department Code** (e.g., SITE, CIVIL, MECHANICAL):",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistrationState.waiting_for_dept_update)
+    await callback.answer()
+
+@router.message(RegistrationState.waiting_for_dept_update, ~F.text.startswith("/"))
+async def process_dept_update(message: Message, state: FSMContext):
+    new_dept = message.text.strip().upper()
+    async with SessionLocal() as db:
+        user_service = UserService(db)
+        user = await user_service.get_user_by_telegram_id(message.from_user.id)
+        if user:
+            user.department_id = new_dept
+            await db.commit()
+    
+    await message.answer(f"✅ Department updated to: `{new_dept}`", parse_mode="Markdown")
+    await state.clear()
+    await cmd_my_data(message)
 
 @router.callback_query(F.data == "change_year")
 async def cb_change_year(callback: CallbackQuery, state: FSMContext):
