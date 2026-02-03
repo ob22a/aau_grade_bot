@@ -32,6 +32,19 @@ async def run_check_all_grades():
             logger.info("Grade check skipped: Service is disabled.")
             return
 
+        # Check portal hours (Portal is down from midnight to 6 AM East Africa Time)
+        from datetime import datetime
+        import pytz
+        eat = pytz.timezone('Africa/Addis_Ababa')
+        current_time = datetime.now(eat)
+        current_hour = current_time.hour
+        
+        if 0 <= current_hour < 6:
+            logger.info(f"Grade check skipped: Portal is in maintenance hours (current hour: {current_hour}). Will retry after 6 AM.")
+            await audit_service.log("CRON_GRADE_CHECK_SKIPPED", source="system", metadata={"reason": "maintenance_hours"})
+            await db.commit()
+            return
+
         user_service = UserService(db)
         grade_service = GradeService(db)
         notification_service = NotificationService()
@@ -275,6 +288,22 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
         notification_service = NotificationService()
         parser = PortalParser()
         audit = AuditService(db)
+
+        # Check portal hours (Portal is down from midnight to 6 AM East Africa Time)
+        from datetime import datetime
+        import pytz
+        eat = pytz.timezone('Africa/Addis_Ababa')
+        current_time = datetime.now(eat)
+        current_hour = current_time.hour
+        
+        if 0 <= current_hour < 6:
+            logger.info(f"Manual grade check skipped for user {telegram_id}: Portal is in maintenance hours (current hour: {current_hour}).")
+            await notification_service.send_notification(
+                telegram_id, 
+                f"⏰ The AAU portal is currently under maintenance (midnight - 6 AM). Please try again after 6:00 AM. Current time: {current_time.strftime('%I:%M %p')}"
+            )
+            await notification_service.close()
+            return
 
         user = await user_service.get_user_by_telegram_id(telegram_id)
         if not user: return
