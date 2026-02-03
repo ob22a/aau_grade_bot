@@ -267,75 +267,98 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
         password = await user_service.get_decrypted_password(user)
         if not password: return
 
-        portal_client = PortalLoginClient()
-        logger.info(f"⏳ Attempting portal login for {user.university_id}...")
-        login_status = portal_client.login(user.university_id, password)
+        # Retry logic for portal down scenarios
+        max_retries = 3
+        retry_delays = [120, 300, 600]  # 2 min, 5 min, 10 min
         
-        if login_status == "SUCCESS":
-            logger.info("🔑 Login successful. Fetching grade report HTML...")
-            html = portal_client.get_grade_report_html()
-            if html:
-                logger.info("📄 HTML received. Parsing grades...")
-                res_data = parser.parse_grade_report(html)
-                courses = res_data["courses"]
+        for attempt in range(max_retries):
+            try:
+                portal_client = PortalLoginClient()
+                logger.info(f"⏳ Attempting portal login for {user.university_id}... (Attempt {attempt + 1}/{max_retries})")
+                login_status = portal_client.login(user.university_id, password)
                 
-                # Update user's academic year/semester from latest scrape if available
-                if courses:
-                    user.academic_year = courses[0]['academic_year']
-                    user.semester = courses[0]['semester']
-                summaries = res_data["summaries"]
-                
-                logger.info(f"📊 Found {len(courses)} courses and {len(summaries)} semester summaries. Checking for updates...")
-                updates_found = 0
-                
-                # Check summaries
-                for s in summaries:
-                    if requested_year != "All" and requested_year not in s["academic_year"]:
-                        continue
-                    h, m = await grade_service.update_or_create_semester_result(user.telegram_id, s)
-                    if h and m:
-                        updates_found += 1
-                        await notification_service.send_notification(telegram_id, m)
-
-                # Check courses
-                for course in courses:
-                    if requested_year != "All" and requested_year not in course["academic_year"]:
-                        continue
-                    # Final Letter
-                    gc, gm = await grade_service.update_or_create_grade(user.telegram_id, course)
-                    if gc and gm:
-                        updates_found += 1
-                        await notification_service.send_notification(telegram_id, gm)
-
-                    # Detail
-                    ids = course.get("assessment_ids", {})
-                    if ids:
-                        detail_html = portal_client.get_assessment_detail_html(
-                            ids["academicYearId"], ids["semesterId"], ids["courseId"]
-                        )
-                        if detail_html:
-                            assessment_data = parser.parse_assessment_detail(detail_html)
-                            has_changed, msg = await grade_service.update_or_create_assessment(
-                                user.telegram_id, course, assessment_data
-                            )
-                            if has_changed and msg:
+                if login_status == "SUCCESS":
+                    logger.info("🔑 Login successful. Fetching grade report HTML...")
+                    html = portal_client.get_grade_report_html()
+                    if html:
+                        logger.info("📄 HTML received. Parsing grades...")
+                        res_data = parser.parse_grade_report(html)
+                        courses = res_data["courses"]
+                        
+                        # Update user's academic year/semester from latest scrape if available
+                        if courses:
+                            user.academic_year = courses[0]['academic_year']
+                            user.semester = courses[0]['semester']
+                        summaries = res_data["summaries"]
+                        
+                        logger.info(f"📊 Found {len(courses)} courses and {len(summaries)} semester summaries. Checking for updates...")
+                        updates_found = 0
+                        
+                        # Check summaries
+                        for s in summaries:
+                            if requested_year != "All" and requested_year not in s["academic_year"]:
+                                continue
+                            h, m = await grade_service.update_or_create_semester_result(user.telegram_id, s)
+                            if h and m:
                                 updates_found += 1
-                                await audit.log("GRADE_UPDATED", telegram_id, {"course": course['course_code'], "type": "detail"})
-                                await notification_service.send_notification(telegram_id, msg)
+                                await notification_service.send_notification(telegram_id, m)
+
+                        # Check courses
+                        for course in courses:
+                            if requested_year != "All" and requested_year not in course["academic_year"]:
+                                continue
+                            # Final Letter
+                            gc, gm = await grade_service.update_or_create_grade(user.telegram_id, course)
+                            if gc and gm:
+                                updates_found += 1
+                                await notification_service.send_notification(telegram_id, gm)
+
+                            # Detail
+                            ids = course.get("assessment_ids", {})
+                            if ids:
+                                detail_html = portal_client.get_assessment_detail_html(
+                                    ids["academicYearId"], ids["semesterId"], ids["courseId"]
+                                )
+                                if detail_html:
+                                    assessment_data = parser.parse_assessment_detail(detail_html)
+                                    has_changed, msg = await grade_service.update_or_create_assessment(
+                                        user.telegram_id, course, assessment_data
+                                    )
+                                    if has_changed and msg:
+                                        updates_found += 1
+                                        await audit.log("GRADE_UPDATED", telegram_id, {"course": course['course_code'], "type": "detail"})
+                                        await notification_service.send_notification(telegram_id, msg)
+                        
+                        await db.commit()
+                        if updates_found == 0:
+                            await notification_service.send_notification(telegram_id, f"✅ Portal check for **{requested_year}** finished. No new updates found.")
+                        else:
+                            await notification_service.send_notification(telegram_id, f"✅ Portal check finished. Applied {updates_found} updates.")
+                    
+                    # Success - break out of retry loop
+                    break
                 
-                await db.commit()
-                if updates_found == 0:
-                    await notification_service.send_notification(telegram_id, f"✅ Portal check for **{requested_year}** finished. No new updates found.")
-                else:
-                    await notification_service.send_notification(telegram_id, f"✅ Portal check finished. Applied {updates_found} updates.")
-        
-        elif login_status == "BAD_CREDENTIALS":
-            user.is_credential_valid = False
-            await db.commit()
-            await notification_service.send_notification(telegram_id, "❌ **Login failed!** Your portal credentials appear to be incorrect.\n\nBackground checking has been **suspended**. Please update them using /my_data.")
-        else:
-            await notification_service.send_notification(telegram_id, "❌ The portal is currently down or unresponsive. I will retry periodically.")
-            raise PortalDownException("Portal is down")
+                elif login_status == "BAD_CREDENTIALS":
+                    user.is_credential_valid = False
+                    await db.commit()
+                    await notification_service.send_notification(telegram_id, "❌ **Login failed!** Your portal credentials appear to be incorrect.\n\nBackground checking has been **suspended**. Please update them using /my_data.")
+                    break  # Don't retry for bad credentials
+                
+                else:  # PORTAL_DOWN
+                    if attempt < max_retries - 1:
+                        delay = retry_delays[attempt]
+                        logger.warning(f"Portal down. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                        await notification_service.send_notification(telegram_id, f"⚠️ Portal is down. Retrying in {delay // 60} minutes... (Attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error(f"Portal down after {max_retries} attempts. Giving up.")
+                        await notification_service.send_notification(telegram_id, "❌ The portal is currently down. I've tried multiple times but couldn't connect. I'll try again during the next scheduled check.")
+                        
+            except Exception as e:
+                logger.error(f"Unexpected error during grade check: {e}")
+                if attempt == max_retries - 1:
+                    await notification_service.send_notification(telegram_id, f"❌ An error occurred while checking grades: {str(e)}")
+                break
         
         await notification_service.close()
 
