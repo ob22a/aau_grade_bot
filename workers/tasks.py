@@ -1,4 +1,4 @@
-from workers.celery_app import celery_app
+# from workers.celery_app import celery_app (Removed for Render Free Tier)
 from database.connection import SessionLocal
 from database.models import User
 from services.user_service import UserService
@@ -339,34 +339,4 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
         
         await notification_service.close()
 
-@celery_app.task(
-    name="workers.tasks.check_user_grades",
-    autoretry_for=(PortalDownException,),
-    retry_backoff=True,
-    max_retries=5
-)
-def check_user_grades_task(telegram_id: int, requested_year: str = "All"):
-    logger.info(f"🚀 TASK START: Manual grade check for {telegram_id} (Year: {requested_year})")
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_check_user_grades(telegram_id, requested_year))
-        logger.info(f"✅ TASK COMPLETE: Manual grade check for {telegram_id}")
-    finally:
-        loop.close()
-
-@celery_app.task(
-    name="workers.tasks.check_all_grades",
-    autoretry_for=(PortalDownException,),
-    retry_backoff=True,
-    max_retries=5
-)
-def check_all_grades():
-    logger.info("🚀 TASK START: Periodic background check (All Users)")
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_check_all_grades())
-        logger.info("✅ TASK COMPLETE: Periodic background check")
-    finally:
-        loop.close()
+# Removed Celery wrappers. main.py and handlers.py now call run_ functions directly via asyncio.create_task.

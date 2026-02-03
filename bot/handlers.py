@@ -297,9 +297,9 @@ async def cb_refresh_portal(callback: CallbackQuery):
 
         await callback.message.answer(f"🔍 Scraping portal for **{requested_year}**... I'll notify you when it's done.", parse_mode="Markdown")
         
-        # Trigger Celery Task
-        from workers.tasks import check_user_grades_task
-        check_user_grades_task.delay(callback.from_user.id, requested_year)
+        # Trigger In-Process Background Task (Render Free Tier)
+        from workers.tasks import run_check_user_grades
+        asyncio.create_task(run_check_user_grades(callback.from_user.id, requested_year))
         
         from services.audit_service import AuditService
         await AuditService(db).log("VIEW_GRADE_SCRAPE", callback.from_user.id, {"year": requested_year})

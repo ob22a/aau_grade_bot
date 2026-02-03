@@ -1,33 +1,19 @@
 services:
-  # 1. The Telegram Bot (Runs as a worker because it uses polling)
-  - type: worker
+  # The unified Bot Web Service (Handles Webhooks + Manual Refreshes + Periodic Checks)
+  - type: web
     name: aau-grade-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
+    # This wakes up the service and triggers the checks
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      - fromGroup: aau-bot-secrets
-
-  # 2. Celery Worker (Handles the actual scraping)
-  - type: worker
-    name: aau-grade-worker
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: celery -A workers.celery_app worker --loglevel=info
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - fromGroup: aau-bot-secrets
-
-  # 3. Celery Beat (The Scheduler - runs every 30 mins)
-  - type: worker
-    name: aau-grade-beat
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: celery -A workers.celery_app beat --loglevel=info
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
+      - key: WEBHOOK_URL
+        # This should be your public Render URL, e.g., https://aau-bot.onrender.com
+        sync: false
+      - key: CRON_SECRET
+        # A secret token to protect your /api/cron-check endpoint
+        generateValue: true
       - fromGroup: aau-bot-secrets
