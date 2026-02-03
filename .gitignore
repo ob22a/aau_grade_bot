@@ -1,0 +1,10 @@
+# Environment variables
+.env
+
+# Project folders
+/lessons/
+/plan/
+
+# Python cache
+__pycache__/
+*.pyc
