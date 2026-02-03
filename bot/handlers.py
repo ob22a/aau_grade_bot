@@ -8,7 +8,7 @@ from services.user_service import UserService
 from sqlalchemy import select
 import logging
 import os
-
+import asyncio
 router = Router()
 logger = logging.getLogger(__name__)
 
