@@ -17,6 +17,7 @@ class RegistrationState(StatesGroup):
     waiting_for_password = State()
     waiting_for_department = State()
     waiting_for_uni_id = State() # For updates
+    waiting_for_password_update = State() # For password-only updates
     waiting_for_dept_update = State() # For department updates
 
 class UpdateState(StatesGroup):
@@ -100,12 +101,18 @@ async def process_department(message: Message, state: FSMContext):
     await message.answer(
         f"✅ <b>Registration complete!</b>\n\n"
         f"University ID: <code>{user.university_id}</code>\n"
-        f"Department: <code>{user.department_id}</code>\n"
-        f"Current Status: <code>{user.academic_year}, {user.semester}</code>\n\n"
-        "I will now periodically check for your grades. Use the buttons below to adjust your academic year/semester if they are different from defaults.",
+        f"Department: <code>{user.department_id}</code>\n\n"
+        "⚡ <b>Initial Sync Started</b>\n"
+        "I'm now fetching your historical grades from the portal for the first time. This usually takes 1-2 minutes.\n\n"
+        "I'll notify you as soon as I have the results! ⏳",
         reply_markup=kb,
         parse_mode="HTML"
     )
+    
+    # Trigger Initial Sync in background
+    from workers.tasks import run_check_user_grades
+    asyncio.create_task(run_check_user_grades(message.from_user.id, "All"))
+    
     await state.clear()
 
 @router.message(Command("my_data"))
@@ -164,19 +171,39 @@ async def process_uni_id_update(message: Message, state: FSMContext):
         await user_service.update_university_id(message.from_user.id, new_id)
         await db.commit()
     
-    await message.answer(f"✅ University ID updated to: ` {new_id} `", parse_mode="Markdown")
+    await message.answer(f"✅ University ID updated to: <code>{html.escape(new_id)}</code>\n\nI'm triggering an update sync to verify your new ID...", parse_mode="HTML")
+    
+    from workers.tasks import run_check_user_grades
+    asyncio.create_task(run_check_user_grades(message.from_user.id, "All"))
+    
     await state.clear()
     await cmd_my_data(message)
 
 @router.callback_query(F.data == "change_password")
 async def cb_change_password(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Please enter your new **Portal Password**:")
-    await state.set_state(RegistrationState.waiting_for_password)
+    await callback.message.answer("Please enter your new **Portal Password**:", parse_mode="Markdown")
+    await state.set_state(RegistrationState.waiting_for_password_update)
     async with SessionLocal() as db:
         from services.audit_service import AuditService
         await AuditService(db).log("CHANGE_PASSWORD_START", callback.from_user.id)
         await db.commit()
     await callback.answer()
+
+@router.message(RegistrationState.waiting_for_password_update, ~F.text.startswith("/"))
+async def process_password_update(message: Message, state: FSMContext):
+    new_password = message.text
+    async with SessionLocal() as db:
+        user_service = UserService(db)
+        await user_service.update_password(message.from_user.id, new_password)
+        await db.commit()
+    
+    await message.answer("✅ <b>Password updated!</b>\n\nI'm triggering an update sync to verify your new password...", parse_mode="HTML")
+    
+    from workers.tasks import run_check_user_grades
+    asyncio.create_task(run_check_user_grades(message.from_user.id, "All"))
+    
+    await state.clear()
+    await cmd_my_data(message)
 
 @router.callback_query(F.data == "change_department")
 async def cb_change_department(callback: CallbackQuery, state: FSMContext):
