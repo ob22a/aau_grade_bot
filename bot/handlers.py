@@ -39,7 +39,7 @@ async def cmd_start(message: Message, state: FSMContext):
             ])
             await message.answer(
                 f"👋 <b>Welcome back!</b>\n\n"
-                f"Logged in as: <code>{html.escape(user.university_id)}</code>\n"
+                f"Logged in as: <tg-spoiler><code>{html.escape(user.university_id)}</code></tg-spoiler>\n"
                 f"Department: <code>{html.escape(user.department_id)}</code>\n"
                 f"Status: <code>{html.escape(user.academic_year)}, {html.escape(user.semester)}</code>\n\n"
                 "You can use the buttons below or /check_grades and /my_data commands.",
@@ -102,7 +102,7 @@ async def process_department(message: Message, state: FSMContext):
 
     await message.answer(
         f"✅ <b>Registration complete!</b>\n\n"
-        f"University ID: <code>{user.university_id}</code>\n"
+        f"University ID: <tg-spoiler><code>{user.university_id}</code></tg-spoiler>\n"
         f"Department: <code>{user.department_id}</code>\n\n"
         "⚡ <b>Initial Sync Started</b>\n"
         "I'm now fetching your historical grades from the portal for the first time. This usually takes 1-2 minutes.\n\n"
@@ -146,8 +146,8 @@ async def cmd_my_data(message: Message, user_id: int = None):
         
         text = (
             f"👤 <b>Your Data</b>\n\n"
-            f"University ID: <code>{html.escape(user.university_id)}</code>\n"
-            f"Password: <code>{html.escape(password or '********')}</code>\n"
+            f"University ID: <tg-spoiler><code>{html.escape(user.university_id)}</code></tg-spoiler>\n"
+            f"Password: <tg-spoiler><code>{html.escape(password or '********')}</code></tg-spoiler>\n"
             f"Department: <code>{html.escape(user.department_id)}</code>\n"
             f"Campus: <code>{html.escape(user.campus_id)}</code>\n"
             f"Academic Status: <code>{html.escape(user.academic_year)}, {html.escape(user.semester)}</code>"
@@ -173,7 +173,7 @@ async def process_uni_id_update(message: Message, state: FSMContext):
         await user_service.update_university_id(message.from_user.id, new_id)
         await db.commit()
     
-    await message.answer(f"✅ University ID updated to: <code>{html.escape(new_id)}</code>\n\nI'm triggering an update sync to verify your new ID...", parse_mode="HTML")
+    await message.answer(f"✅ University ID updated to: <tg-spoiler><code>{html.escape(new_id)}</code></tg-spoiler>\n\nI'm triggering an update sync to verify your new ID...", parse_mode="HTML")
     
     from workers.tasks import run_check_user_grades
     asyncio.create_task(run_check_user_grades(message.from_user.id, "All"))

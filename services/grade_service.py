@@ -348,7 +348,7 @@ class GradeService:
         summaries = results["summaries"]
 
         if not grades and not summaries:
-            t = self.escape_html(title)
+            t = GradeService.escape_html(title)
             return [{
                 "text": f"📭 No results found for <b>{t}</b>.\n\nThis could mean:\n• Results haven't been released yet\n• You haven't reached that year level\n• Try checking 'All' years.",
                 "kb_data": None
@@ -367,7 +367,7 @@ class GradeService:
         sorted_keys = sorted(grouped.keys())
 
         for period in sorted_keys:
-            p = self.escape_html(period)
+            p = GradeService.escape_html(period)
             msg = f"📚 <b>{p}</b>\n\n"
             period_grades = grouped[period]
             
@@ -376,7 +376,7 @@ class GradeService:
                 emoji = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"][idx-1] if idx <= 10 else "🔹"
                 grade_val = g.grade if g.grade and g.grade != "NG" else "Pending"
                 
-                name = self.escape_html(g.course_name or g.course_id)
+                name = GradeService.escape_html(g.course_name or g.course_id)
                 msg += f"{emoji} <b>{name}</b>\n"
                 msg += f"   Code: <code>{g.course_id}</code> | Grade: <b>{grade_val}</b>\n\n"
                 
@@ -387,7 +387,7 @@ class GradeService:
             if summary:
                 msg += f"📈 <b>Summary</b>\n"
                 msg += f"SGPA: <code>{summary.sgpa or '0.00'}</code> | CGPA: <code>{summary.cgpa or '0.00'}</code>\n"
-                msg += f"Status: <i>{self.escape_html(summary.status or 'N/A')}</i>\n"
+                msg += f"Status: <i>{GradeService.escape_html(summary.status or 'N/A')}</i>\n"
 
             chunks.append({
                 "text": msg,
@@ -420,7 +420,8 @@ class GradeService:
         
         return msg
 
-    def escape_html(self, text: str) -> str:
+    @staticmethod
+    def escape_html(text: str) -> str:
         """Simple HTML escaping for safety"""
         if not text: return ""
         return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
