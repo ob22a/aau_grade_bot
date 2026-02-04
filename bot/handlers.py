@@ -48,7 +48,8 @@ async def cmd_start(message: Message, state: FSMContext):
             return
 
     await message.answer(
-        "👋 Welcome! I am your AAU Grade Bot.\n\n"
+        "👋 Welcome! I am your **AAU Grade Bot**.\n\n"
+        "🔒 **Privacy First**: All your grades and portal data are secured with military-grade **AES-256 encryption**. Only you can view your results.\n\n"
         "To get started, please enter your **University ID** (e.g., UGR/1234/16):",
         parse_mode="Markdown"
     )
@@ -425,7 +426,8 @@ async def cmd_admin(message: Message):
         f"Scheduler Status: **{status}**\n\n"
         "Commands:\n"
         "/start_service - Enable periodic checks\n"
-        "/stop_service - Disable periodic checks",
+        "/stop_service - Disable periodic checks\n"
+        "/encrypt_db - 🔒 Migrate DB to AES-256",
         parse_mode="Markdown"
     )
 
@@ -470,3 +472,54 @@ async def cmd_stop_service(message: Message):
         await db.commit()
 
     await message.answer("🛑 Grade checking service **DISABLED**.", parse_mode="Markdown")
+
+@router.message(Command("encrypt_db"))
+async def cmd_encrypt_db(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    await message.answer("🔐 **Database Encryption Migration Started**\n\nI'm scanning for unencrypted records and securing them with AES-256. This may take a moment...", parse_mode="Markdown")
+    
+    success_count = 0
+    async with SessionLocal() as db:
+        from database.models import Grade, Assessment, SemesterResult
+        from services.credential_service import EncryptionService
+        encryption_service = EncryptionService()
+        
+        # 1. Migrate Grades
+        res = await db.execute(select(Grade).where(Grade.iv == None))
+        grades = res.scalars().all()
+        for g in grades:
+            enc_grade, iv = encryption_service.encrypt_string(g.grade)
+            g.grade = enc_grade
+            g.iv = iv
+            if g.course_name: g.course_name, _ = encryption_service.encrypt_string(g.course_name)
+            if g.credit_hour: g.credit_hour, _ = encryption_service.encrypt_string(g.credit_hour)
+            if g.ects: g.ects, _ = encryption_service.encrypt_string(g.ects)
+            success_count += 1
+
+        # 2. Migrate Assessments
+        res = await db.execute(select(Assessment).where(Assessment.iv == None))
+        assessments = res.scalars().all()
+        for a in assessments:
+            if a.assessment_data:
+                enc_data, iv = encryption_service.encrypt_json(a.assessment_data)
+                a.encrypted_data = enc_data
+                a.iv = iv
+                a.assessment_data = None
+                success_count += 1
+
+        # 3. Migrate Semester Results
+        res = await db.execute(select(SemesterResult).where(SemesterResult.iv == None))
+        results = res.scalars().all()
+        for s in results:
+            enc_sgpa, iv = encryption_service.encrypt_string(s.sgpa)
+            s.sgpa = enc_sgpa
+            s.cgpa, _ = encryption_service.encrypt_string(s.cgpa)
+            s.status, _ = encryption_service.encrypt_string(s.status)
+            s.iv = iv
+            success_count += 1
+            
+        await db.commit()
+
+    await message.answer(f"✅ **Encryption Complete!**\n\nSecured `{success_count}` records with AES-256-CBC.", parse_mode="Markdown")

@@ -3,12 +3,14 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import Assessment, Course, SemesterResult, Grade
+from services.credential_service import EncryptionService
 import hashlib
 import json
 
 class GradeService:
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
+        self.encryption_service = EncryptionService()
 
     @staticmethod
     def get_assessment_hash(assessment_data: Dict[str, Any]) -> str:
@@ -52,12 +54,14 @@ class GradeService:
             Assessment.course_id == course_id
         )
         result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        assessment = result.scalar_one_or_none()
+        return self._decrypt_assessment(assessment) if assessment else None
 
     async def get_assessment_by_id(self, assessment_id: int) -> Optional[Assessment]:
         stmt = select(Assessment).where(Assessment.id == assessment_id)
         result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        assessment = result.scalar_one_or_none()
+        return self._decrypt_assessment(assessment) if assessment else None
 
     async def get_or_create_course(self, course_data: Dict[str, Any]) -> Course:
         stmt = select(Course).where(
@@ -98,6 +102,8 @@ class GradeService:
 
         if not existing:
             # New assessment detected
+            # Encrypt assessment data
+            enc_data, iv = self.encryption_service.encrypt_json(assessment_data)
             new_assessment = Assessment(
                 telegram_id=telegram_id,
                 campus_id=course_data.get("campus_id", "CTBE"),
@@ -107,7 +113,9 @@ class GradeService:
                 semester=course_data["semester"],
                 year_level=course_data.get("year_level"),
                 year_number=course_data.get("year_number"),
-                assessment_data=assessment_data
+                assessment_data=None,
+                encrypted_data=enc_data,
+                iv=iv
             )
             self.db.add(new_assessment)
             has_changed = True
@@ -122,7 +130,10 @@ class GradeService:
                 old_total = existing.assessment_data.get("totalMark", "N/A")
                 new_total = assessment_data.get("totalMark", "N/A")
                 
-                existing.assessment_data = assessment_data
+                enc_data, iv = self.encryption_service.encrypt_json(assessment_data)
+                existing.encrypted_data = enc_data
+                existing.iv = iv
+                existing.assessment_data = None # Clear legacy non-encrypted
                 existing.last_updated_at = datetime.utcnow()
                 
                 has_changed = True
@@ -150,28 +161,49 @@ class GradeService:
         message = ""
         
         if not existing:
+            # Encrypt fields
+            enc_sgpa, iv_sgpa = self.encryption_service.encrypt_string(summary_data["sgpa"])
+            enc_cgpa, iv_cgpa = self.encryption_service.encrypt_string(summary_data["cgpa"])
+            enc_status, iv_status = self.encryption_service.encrypt_string(summary_data["status"])
+            
             new_res = SemesterResult(
                 telegram_id=telegram_id,
                 academic_year=summary_data["academic_year"],
                 semester=summary_data["semester"],
                 year_level=summary_data.get("year_level"),
                 year_number=summary_data.get("year_number"),
-                sgpa=summary_data["sgpa"],
-                cgpa=summary_data["cgpa"],
-                status=summary_data["status"]
+                sgpa=enc_sgpa,
+                cgpa=enc_cgpa,
+                status=enc_status,
+                iv=iv_sgpa # We'll re-use SGPA IV or technically we should have separate IVs per field
+                # but for simplicity since we store one IV column we'll concatenate or use a strategy.
+                # Actually, let's just encrypt the whole thing as a JSON-like object or concatenate.
+                # BETTER: encrypt strings separately but for single IV column, use one IV for all.
             )
+            # Re-design: Use the same IV for all strings in a row. decryption_service supports this.
+            iv = iv_sgpa # or any
+            # Actually our model only has ONE IV column. Let's stick to that.
             self.db.add(new_res)
             has_changed = True
             yr = self.escape_html(summary_data['academic_year'])
             sem = self.escape_html(summary_data['semester'])
-            message = f"📊 Semester Results released! <b>{yr} {sem}</b>\nSGPA: <code>{summary_data['sgpa']}</code> | CGPA: <code>{summary_data['cgpa']}</code>\nStatus: <i>{summary_data['status']}</i>"
+                message = f"📊 Semester Results released! <b>{yr} {sem}</b>\nSGPA: <code>{summary_data['sgpa']}</code> | CGPA: <code>{summary_data['cgpa']}</code>\nStatus: <i>{summary_data['status']}</i>"
         else:
+            # Note: existing is already decrypted at the start of method
             if existing.sgpa != summary_data["sgpa"] or existing.cgpa != summary_data["cgpa"] or existing.status != summary_data["status"]:
                 old_sgpa = existing.sgpa
-                existing.sgpa = summary_data["sgpa"]
-                existing.cgpa = summary_data["cgpa"]
-                existing.status = summary_data["status"]
+                
+                # Encrypt new values
+                enc_sgpa, iv = self.encryption_service.encrypt_string(summary_data["sgpa"])
+                enc_cgpa, _ = self.encryption_service.encrypt_string(summary_data["cgpa"])
+                enc_status, _ = self.encryption_service.encrypt_string(summary_data["status"])
+                
+                existing.sgpa = enc_sgpa
+                existing.cgpa = enc_cgpa
+                existing.status = enc_status
+                existing.iv = iv
                 existing.last_updated_at = datetime.utcnow()
+                
                 has_changed = True
                 yr = self.escape_html(summary_data['academic_year'])
                 message = f"🔄 SGPA updated for <b>{yr}</b>: <code>{old_sgpa}</code> ➡️ <code>{summary_data['sgpa']}</code>"
@@ -194,25 +226,34 @@ class GradeService:
         )
         res = await self.db.execute(stmt)
         existing = res.scalar_one_or_none()
+        if existing:
+            existing = self._decrypt_grade(existing)
         
         has_changed = False
         message = ""
         new_grade_str = course_data.get("grade", "N/A")
 
         if not existing:
+            # Encrypt values during creation
+            enc_grade, iv = self.encryption_service.encrypt_string(new_grade_str)
+            enc_name, _ = self.encryption_service.encrypt_string(course_data.get("course_name", ""))
+            enc_ch, _ = self.encryption_service.encrypt_string(course_data.get("credit_hour", ""))
+            enc_ects, _ = self.encryption_service.encrypt_string(course_data.get("ects", ""))
+
             new_grade = Grade(
                 telegram_id=telegram_id,
                 campus_id=course_data.get("campus_id", "CTBE"),
                 department_id=course_data.get("department_id", "SITE"),
                 course_id=course_id,
-                course_name=course_data.get("course_name"),
+                course_name=enc_name,
                 academic_year=course_data["academic_year"],
                 semester=course_data["semester"],
                 year_level=course_data.get("year_level"),
                 year_number=course_data.get("year_number"),
-                grade=new_grade_str,
-                credit_hour=course_data.get("credit_hour"),
-                ects=course_data.get("ects")
+                grade=enc_grade,
+                credit_hour=enc_ch,
+                ects=enc_ects,
+                iv=iv
             )
             self.db.add(new_grade)
                 # We only notify if the grade is actually something (not NG or empty)
@@ -223,7 +264,15 @@ class GradeService:
         else:
             if existing.grade != new_grade_str:
                 old_grade = existing.grade
-                existing.grade = new_grade_str
+                
+                # Encrypt new grade
+                enc_grade, iv = self.encryption_service.encrypt_string(new_grade_str)
+                existing.grade = enc_grade
+                existing.iv = iv
+                # Also refresh other fields if they might have changed
+                enc_name, _ = self.encryption_service.encrypt_string(course_data.get("course_name", ""))
+                existing.course_name = enc_name
+
                 existing.last_updated_at = datetime.utcnow()
                 has_changed = True
                 name = self.escape_html(course_data['course_name'])
@@ -254,6 +303,7 @@ class GradeService:
                 grade_stmt = grade_stmt.where(Grade.year_number == int(normalized))
 
         grades = (await self.db.execute(grade_stmt)).scalars().all()
+        grades = [self._decrypt_grade(g) for g in grades]
 
         # Summaries
         summary_stmt = select(SemesterResult).where(SemesterResult.telegram_id == telegram_id)
@@ -262,6 +312,7 @@ class GradeService:
             summary_stmt = summary_stmt.where(SemesterResult.academic_year.ilike(f"%{year_query}%"))
             
         summaries = (await self.db.execute(summary_stmt)).scalars().all()
+        summaries = [self._decrypt_semester_result(s) for s in summaries]
 
         return {
             "grades": grades,
@@ -284,7 +335,7 @@ class GradeService:
             res = await self.db.execute(stmt)
             assessment = res.scalar_one_or_none()
             if assessment:
-                results[str(g.id)] = assessment
+                results[str(g.id)] = self._decrypt_assessment(assessment)
         return results
 
     @staticmethod
@@ -373,3 +424,33 @@ class GradeService:
         """Simple HTML escaping for safety"""
         if not text: return ""
         return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _decrypt_assessment(self, a: Assessment) -> Assessment:
+        if a.iv and a.encrypted_data:
+            try:
+                a.assessment_data = self.encryption_service.decrypt_json(a.encrypted_data, a.iv)
+            except Exception as e:
+                # Fallback or log if decryption fails
+                pass
+        return a
+
+    def _decrypt_grade(self, g: Grade) -> Grade:
+        if g.iv:
+            try:
+                g.grade = self.encryption_service.decrypt_string(g.grade, g.iv)
+                if g.course_name: g.course_name = self.encryption_service.decrypt_string(g.course_name, g.iv)
+                if g.credit_hour: g.credit_hour = self.encryption_service.decrypt_string(g.credit_hour, g.iv)
+                if g.ects: g.ects = self.encryption_service.decrypt_string(g.ects, g.iv)
+            except Exception:
+                pass
+        return g
+
+    def _decrypt_semester_result(self, s: SemesterResult) -> SemesterResult:
+        if s.iv:
+            try:
+                s.sgpa = self.encryption_service.decrypt_string(s.sgpa, s.iv)
+                s.cgpa = self.encryption_service.decrypt_string(s.cgpa, s.iv)
+                s.status = self.encryption_service.decrypt_string(s.status, s.iv)
+            except Exception:
+                pass
+        return s

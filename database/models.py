@@ -88,7 +88,9 @@ class Assessment(Base):
     year_level: Mapped[Optional[str]] = mapped_column(String(50))  # "Year III"
     year_number: Mapped[Optional[int]] = mapped_column()  # 3
     
-    assessment_data: Mapped[dict] = mapped_column(JSON)
+    assessment_data: Mapped[Optional[dict]] = mapped_column(JSON) # Store raw JSON if not encrypted
+    encrypted_data: Mapped[Optional[str]] = mapped_column(Text) # Store encrypted Base64
+    iv: Mapped[Optional[str]] = mapped_column(String(255))
     last_updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class AuditLog(Base):
@@ -117,9 +119,10 @@ class Grade(Base):
     year_level: Mapped[Optional[str]] = mapped_column(String(50))  # "Year III"
     year_number: Mapped[Optional[int]] = mapped_column()  # 3
     
-    grade: Mapped[str] = mapped_column(String(10)) # A, B+, NG, etc.
-    credit_hour: Mapped[Optional[str]] = mapped_column(String(10))  # Store credit hours
-    ects: Mapped[Optional[str]] = mapped_column(String(10))  # Store ECTS
+    grade: Mapped[str] = mapped_column(String(255)) # Scrambled encrypted string
+    credit_hour: Mapped[Optional[str]] = mapped_column(String(255))
+    ects: Mapped[Optional[str]] = mapped_column(String(255))
+    iv: Mapped[Optional[str]] = mapped_column(String(255))
     last_updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class GradeCheckStatus(Base):
@@ -153,8 +156,9 @@ class SemesterResult(Base):
     year_level: Mapped[Optional[str]] = mapped_column(String(50))  # "Year III"
     year_number: Mapped[Optional[int]] = mapped_column()  # 3
     
-    sgpa: Mapped[str] = mapped_column(String(10))
-    cgpa: Mapped[str] = mapped_column(String(10))
-    status: Mapped[str] = mapped_column(String(100))
+    sgpa: Mapped[str] = mapped_column(String(255))
+    cgpa: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(255))
+    iv: Mapped[Optional[str]] = mapped_column(String(255))
     
     last_updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

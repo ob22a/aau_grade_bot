@@ -2,13 +2,13 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import User, UserCredential
-from services.credential_service import CredentialService
+from services.credential_service import EncryptionService
 import uuid
 
 class UserService:
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
-        self.credential_service = CredentialService()
+        self.encryption_service = EncryptionService()
 
     async def get_user_by_telegram_id(self, telegram_id: int) -> Optional[User]:
         stmt = select(User).where(User.telegram_id == telegram_id)
@@ -39,7 +39,7 @@ class UserService:
             await audit.log("USER_REGISTERED", telegram_id, {"dept": department_id})
             
         # Update/Create credential
-        encrypted_pw, iv = self.credential_service.encrypt_password(password)
+        encrypted_pw, iv = self.encryption_service.encrypt_password(password)
         
         stmt = select(UserCredential).where(UserCredential.user_id == user.id)
         cred_result = await self.db.execute(stmt)
@@ -91,7 +91,7 @@ class UserService:
         if not credential:
             return None
             
-        return self.credential_service.decrypt_password(
+        return self.encryption_service.decrypt_password(
             credential.encrypted_password, 
             credential.iv
         )
