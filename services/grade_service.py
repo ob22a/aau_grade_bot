@@ -282,8 +282,15 @@ class GradeService:
         """
         Retrieves all stored grades and semester summaries for a user with flexible year matching.
         """
-        # Final Grades
-        grade_stmt = select(Grade).where(Grade.telegram_id == telegram_id)
+        # Final Grades - Join with Course to get plaintext name
+        grade_stmt = select(Grade, Course.course_name.label("plaintext_name")).join(
+            Course,
+            (Grade.course_id == Course.course_id) &
+            (Grade.campus_id == Course.campus_id) &
+            (Grade.department_id == Course.department_id) &
+            (Grade.academic_year == Course.academic_year) &
+            (Grade.semester == Course.semester)
+        ).where(Grade.telegram_id == telegram_id)
         
         if year_query != "All":
             # Flexible matching for "Year 3", "3", "III", etc.
@@ -300,8 +307,16 @@ class GradeService:
             if normalized.isdigit():
                 grade_stmt = grade_stmt.where(Grade.year_number == int(normalized))
 
-        grades = (await self.db.execute(grade_stmt)).scalars().all()
-        grades = [self._decrypt_grade(g) for g in grades]
+        # Execute and extract
+        rows = (await self.db.execute(grade_stmt)).all()
+        grades = []
+        for row in rows:
+            g = row.Grade
+            g = self._decrypt_grade(g)
+            # Override encrypted name with plaintext from Course table if exists
+            if row.plaintext_name:
+                g.course_name = row.plaintext_name
+            grades.append(g)
 
         # Summaries
         summary_stmt = select(SemesterResult).where(SemesterResult.telegram_id == telegram_id)
@@ -323,17 +338,28 @@ class GradeService:
         """
         results = {}
         for g in grades:
-            # Look up assessment by course code and period
-            stmt = select(Assessment).where(
+            # Look up assessment by course code and period - join for plaintext name
+            stmt = select(Assessment, Course.course_name.label("plaintext_name")).join(
+                Course,
+                (Assessment.course_id == Course.course_id) &
+                (Assessment.campus_id == Course.campus_id) &
+                (Assessment.department_id == Course.department_id) &
+                (Assessment.academic_year == Course.academic_year) &
+                (Assessment.semester == Course.semester)
+            ).where(
                 Assessment.telegram_id == telegram_id,
                 Assessment.course_id == g.course_id,
                 Assessment.academic_year == g.academic_year,
                 Assessment.semester == g.semester
             )
             res = await self.db.execute(stmt)
-            assessment = res.scalar_one_or_none()
-            if assessment:
-                results[str(g.id)] = self._decrypt_assessment(assessment)
+            row = res.first()
+            if row:
+                assessment = row.Assessment
+                assessment = self._decrypt_assessment(assessment)
+                # We can't easily inject the name into Assessment model without a field, 
+                # but Grade already has the name we patched above.
+                results[str(g.id)] = assessment
         return results
 
     @staticmethod
