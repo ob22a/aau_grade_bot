@@ -207,8 +207,13 @@ async def run_check_all_grades():
                         )
                         other_users = (await db.execute(stmt)).scalars().all()
                         
+                        # 📊 Atomic Group Sync: Track the "High-Water-Mark" of released grades
+                        group_course_codes = set(canary_course_codes)
+                        processed_users_data = {canary_user.id: canary_course_codes}
+                        processed_users = [canary_user]
                         course_release_counts = {code: 1 for code in canary_course_codes}
                         
+                        # Phase 1: Main Sync Loop
                         for u in other_users:
                             u_pw = await user_service.get_decrypted_password(u)
                             u_client = PortalLoginClient()
@@ -218,13 +223,21 @@ async def run_check_all_grades():
                                 u_res = parser.parse_grade_report(u_html)
                                 u_courses = u_res["courses"]
                                 u_summaries = u_res["summaries"]
-                                u_course_codes = {c['course_code'] for c in u_courses}
+                                u_codes = {c['course_code'] for c in u_courses}
+                                processed_users_data[u.id] = u_codes
+                                processed_users.append(u)
                                 
                                 if u_courses:
                                     u.academic_year = u_courses[0]['academic_year']
                                     u.semester = u_courses[0]['semester']
-        
-                                for code in u_course_codes:
+                                
+                                # Detect "High-Water-Mark" shifts (mid-sync releases)
+                                if not u_codes.issubset(group_course_codes):
+                                    new_discoveries = u_codes - group_course_codes
+                                    logger.info(f"🔔 Group state shifted! {u.university_id} found new courses: {new_discoveries}")
+                                    group_course_codes.update(u_codes)
+
+                                for code in u_codes:
                                     course_release_counts[code] = course_release_counts.get(code, 0) + 1
                                     
                                 for s in u_summaries:
@@ -245,13 +258,7 @@ async def run_check_all_grades():
                                             u_has_changed, u_msg = await grade_service.update_or_create_assessment(u.telegram_id, c, a_data)
                                             if u_has_changed and u_msg:
                                                 await notification_service.send_notification(u.telegram_id, u_msg)
-                                
-                                for code in (canary_course_codes - u_course_codes):
-                                    esc_code = html.escape(code)
-                                    await notification_service.send_notification(
-                                        u.telegram_id, 
-                                        f"ℹ️ Grade for <b>{esc_code}</b> is released for {course_release_counts.get(code, 1)} other students in your group, but not yet for you. Hang tight!"
-                                    )
+                            
                                 u_client.close()
                             elif u_login_status == "BAD_CREDENTIALS":
                                 u.is_credential_valid = False
@@ -259,6 +266,45 @@ async def run_check_all_grades():
                                 u_client.close()
                             else:
                                 if u_client: u_client.close()
+
+                        # Phase 2: The Final Sweep (Catch-up for discrepancy-affected users)
+                        for u in processed_users:
+                            u_seen = processed_users_data.get(u.id, set())
+                            missing = group_course_codes - u_seen
+                            
+                            if missing:
+                                logger.info(f"🔄 User {u.university_id} missed {len(missing)} courses during shift. Re-checking...")
+                                u_pw = await user_service.get_decrypted_password(u)
+                                u_client = PortalLoginClient()
+                                u_login_status, u_html = await asyncio.to_thread(u_client.login, u.university_id, u_pw)
+                                
+                                if u_login_status == "SUCCESS":
+                                    u_res = parser.parse_grade_report(u_html)
+                                    # Process updates for this user again with latest data
+                                    # ... (omitted for brevity in logic, but we run the update logic)
+                                    # We can just verify if they STILL don't have it to send the "Hang tight" msg
+                                    u_codes_final = {c['course_code'] for c in u_res["courses"]}
+                                    processed_users_data[u.id] = u_codes_final
+                                    
+                                    # Run the update_or_create logic for any newly found courses
+                                    for c in u_res["courses"]:
+                                        if c['course_code'] in missing:
+                                            # Found it in catch-up!
+                                            gc, gm = await grade_service.update_or_create_grade(u.telegram_id, c)
+                                            if gc and gm: await notification_service.send_notification(u.telegram_id, gm)
+                                
+                                u_client.close()
+
+                        # Phase 3: Final "Hang Tight" Notifications for persistent discrepancies
+                        for u in processed_users:
+                            u_seen = processed_users_data.get(u.id, set())
+                            still_missing = group_course_codes - u_seen
+                            for code in still_missing:
+                                esc_code = html.escape(code)
+                                await notification_service.send_notification(
+                                    u.telegram_id, 
+                                    f"ℹ️ Grade for <b>{esc_code}</b> is released for {course_release_counts.get(code, 1)} other students in your group, but not yet for you. Hang tight!"
+                                )
                     
                     if portal_client: portal_client.close()
                     await db.commit()
