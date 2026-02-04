@@ -39,7 +39,7 @@ class PortalLoginClient:
             "Referer": f"{self.base_url}/login",
             "X-Forwarded-For": "196.188.0.1" # Mock Ethio Telecom IP
         })
-        self.timeout = 30 # Increased from 10 to 30 for international routing
+        self.timeout = 60 # Increased from 30 to 60 due to persistent timeouts on Render
 
     def login(self, username: str, password: str) -> str:
         """
