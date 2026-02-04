@@ -366,7 +366,7 @@ async def cb_refresh_portal(callback: CallbackQuery):
     await callback.answer("Scraping started!")
     await callback.message.answer(
         f"🔍 **Force Refresh Started** for {requested_year}\n\n"
-        f"I'm connecting to the AAU portal now. This usually takes 30-60 seconds.\n"
+        f"I'm connecting to the AAU portal now. This usually takes 120-180 seconds.\n"
         f"I'll notify you here as soon as I have the latest results! ⏳",
         parse_mode="Markdown"
     )

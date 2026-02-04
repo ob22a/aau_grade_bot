@@ -111,7 +111,8 @@ class GradeService:
             )
             self.db.add(new_assessment)
             has_changed = True
-            message = f"🆕 New grade uploaded for {course_data['course_name']} ({course_id})!"
+            name = self.escape_html(course_data['course_name'])
+            message = f"🆕 New grade uploaded for <b>{name}</b> (<code>{course_id}</code>)!"
         else:
             # Check for changes
             old_hash = self.get_assessment_hash(existing.assessment_data)
@@ -125,10 +126,11 @@ class GradeService:
                 existing.last_updated_at = datetime.utcnow()
                 
                 has_changed = True
+                name = self.escape_html(course_data['course_name'])
                 if old_total != new_total:
-                    message = f"🔄 Grade updated for {course_data['course_name']}: {old_total} ➡️ {new_total}"
+                    message = f"🔄 Grade updated for <b>{name}</b>: <code>{old_total}</code> ➡️ <code>{new_total}</code>"
                 else:
-                    message = f"📝 Assessment details updated for {course_data['course_name']}."
+                    message = f"📝 Assessment details updated for <b>{name}</b>."
 
         return has_changed, message
 
@@ -160,7 +162,9 @@ class GradeService:
             )
             self.db.add(new_res)
             has_changed = True
-            message = f"📊 Semester Results released! {summary_data['academic_year']} {summary_data['semester']}\nSGPA: {summary_data['sgpa']} | CGPA: {summary_data['cgpa']}\nStatus: {summary_data['status']}"
+            yr = self.escape_html(summary_data['academic_year'])
+            sem = self.escape_html(summary_data['semester'])
+            message = f"📊 Semester Results released! <b>{yr} {sem}</b>\nSGPA: <code>{summary_data['sgpa']}</code> | CGPA: <code>{summary_data['cgpa']}</code>\nStatus: <i>{summary_data['status']}</i>"
         else:
             if existing.sgpa != summary_data["sgpa"] or existing.cgpa != summary_data["cgpa"] or existing.status != summary_data["status"]:
                 old_sgpa = existing.sgpa
@@ -169,7 +173,8 @@ class GradeService:
                 existing.status = summary_data["status"]
                 existing.last_updated_at = datetime.utcnow()
                 has_changed = True
-                message = f"🔄 SGPA updated for {summary_data['academic_year']}: {old_sgpa} ➡️ {summary_data['sgpa']}"
+                yr = self.escape_html(summary_data['academic_year'])
+                message = f"🔄 SGPA updated for <b>{yr}</b>: <code>{old_sgpa}</code> ➡️ <code>{summary_data['sgpa']}</code>"
         
         return has_changed, message
     async def update_or_create_grade(self, telegram_id: int, course_data: Dict[str, Any]) -> tuple[bool, str]:
@@ -210,17 +215,19 @@ class GradeService:
                 ects=course_data.get("ects")
             )
             self.db.add(new_grade)
-            # We only notify if the grade is actually something (not NG or empty)
+                # We only notify if the grade is actually something (not NG or empty)
             if new_grade_str and new_grade_str not in ["", "NG"]:
                 has_changed = True
-                message = f"🎓 Final grade released for **{course_data['course_name']}**: `{new_grade_str}`"
+                name = self.escape_html(course_data['course_name'])
+                message = f"🎓 Final grade released for <b>{name}</b>: <code>{new_grade_str}</code>"
         else:
             if existing.grade != new_grade_str:
                 old_grade = existing.grade
                 existing.grade = new_grade_str
                 existing.last_updated_at = datetime.utcnow()
                 has_changed = True
-                message = f"🔄 Final grade updated for **{course_data['course_name']}**: `{old_grade}` ➡️ `{new_grade_str}`"
+                name = self.escape_html(course_data['course_name'])
+                message = f"🔄 Final grade updated for <b>{name}</b>: <code>{old_grade}</code> ➡️ <code>{new_grade_str}</code>"
 
         return has_changed, message
 
@@ -290,8 +297,9 @@ class GradeService:
         summaries = results["summaries"]
 
         if not grades and not summaries:
+            t = self.escape_html(title)
             return [{
-                "text": f"📭 No results found for **{title}**.\n\nThis could mean:\n• Results haven't been released yet\n• You haven't reached that year level\n• Try checking 'All' years.",
+                "text": f"📭 No results found for <b>{t}</b>.\n\nThis could mean:\n• Results haven't been released yet\n• You haven't reached that year level\n• Try checking 'All' years.",
                 "kb_data": None
             }]
 
@@ -308,7 +316,8 @@ class GradeService:
         sorted_keys = sorted(grouped.keys())
 
         for period in sorted_keys:
-            msg = f"📚 **{period}**\n\n"
+            p = self.escape_html(period)
+            msg = f"📚 <b>{p}</b>\n\n"
             period_grades = grouped[period]
             
             buttons = []
@@ -316,17 +325,18 @@ class GradeService:
                 emoji = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"][idx-1] if idx <= 10 else "🔹"
                 grade_val = g.grade if g.grade and g.grade != "NG" else "Pending"
                 
-                msg += f"{emoji} **{g.course_name or g.course_id}**\n"
-                msg += f"   Code: `{g.course_id}` | Grade: **{grade_val}**\n\n"
+                name = self.escape_html(g.course_name or g.course_id)
+                msg += f"{emoji} <b>{name}</b>\n"
+                msg += f"   Code: <code>{g.course_id}</code> | Grade: <b>{grade_val}</b>\n\n"
                 
                 buttons.append({"text": f"📊 {g.course_id}", "callback_data": f"view_asms_{g.id}"})
 
             # Check for summary
             summary = next((s for s in summaries if s.academic_year in period or s.semester in period), None)
             if summary:
-                msg += f"📈 **Summary**\n"
-                msg += f"SGPA: `{summary.sgpa or '0.00'}` | CGPA: `{summary.cgpa or '0.00'}`\n"
-                msg += f"Status: _{summary.status or 'N/A'}_\n"
+                msg += f"📈 <b>Summary</b>\n"
+                msg += f"SGPA: <code>{summary.sgpa or '0.00'}</code> | CGPA: <code>{summary.cgpa or '0.00'}</code>\n"
+                msg += f"Status: <i>{self.escape_html(summary.status or 'N/A')}</i>\n"
 
             chunks.append({
                 "text": msg,
@@ -335,26 +345,31 @@ class GradeService:
 
         return chunks
 
-    @staticmethod
-    def format_assessment_detail(grade: Grade, assessment: Assessment) -> str:
+    def format_assessment_detail(self, grade: Grade, assessment: Assessment) -> str:
         """
         Formats assessment breakdown for a course.
         """
-        msg = f"📊 **{grade.course_name or grade.course_id}**\n"
-        msg += f"Code: `{grade.course_id}`\n"
-        msg += f"Final Grade: **{grade.grade or 'N/A'}**\n\n"
+        name = self.escape_html(grade.course_name or grade.course_id)
+        msg = f"📊 <b>{name}</b>\n"
+        msg += f"Code: <code>{grade.course_id}</code>\n"
+        msg += f"Final Grade: <b>{grade.grade or 'N/A'}</b>\n\n"
         
-        msg += "📝 **Assessment Breakdown:**\n"
+        msg += "📝 <b>Assessment Breakdown:</b>\n"
         data = assessment.assessment_data
         
         grades = data.get("grades", [])
         if not grades:
-            msg += "   _No breakdown available_\n"
+            msg += "   <i>No breakdown available</i>\n"
         else:
             for g in grades:
-                msg += f"• {g['name']} ({g.get('weight', '??')}): **{g['result']}**\n"
+                msg += f"• {self.escape_html(g['name'])} ({g.get('weight', '??')}): <b>{g['result']}</b>\n"
         
         total = data.get("totalMark", "N/A")
-        msg += f"\n✅ **Total:** `{total}`"
+        msg += f"\n✅ <b>Total:</b> <code>{total}</code>"
         
         return msg
+
+    def escape_html(self, text: str) -> str:
+        """Simple HTML escaping for safety"""
+        if not text: return ""
+        return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

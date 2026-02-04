@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 from services.audit_service import AuditService
 from sqlalchemy import func
+import html
 
 class PortalDownException(Exception):
     pass
@@ -87,7 +88,7 @@ async def run_check_all_grades():
                             if not password: continue
                             
                             pc_client = PortalLoginClient()
-                            pc_status, html = pc_client.login(pc.university_id, password)
+                            pc_status, html = await asyncio.to_thread(pc_client.login, pc.university_id, password)
                             
                             if pc_status == "SUCCESS":
                                 canary_user = pc
@@ -98,9 +99,10 @@ async def run_check_all_grades():
                             elif pc_status == "BAD_CREDENTIALS":
                                 pc.is_credential_valid = False
                                 await db.commit()
-                                await notification_service.send_notification(pc.telegram_id, "⚠️ Background check failed: **Invalid Portal Credentials**. Background checking is now **suspended** for your account. Please update your password using /my_data to resume tracking.")
+                                await notification_service.send_notification(pc.telegram_id, "⚠️ Background check failed: <b>Invalid Portal Credentials</b>. Background checking is now <b>suspended</b> for your account. Please update your password using /my_data to resume tracking.")
                                 logger.warning(f"Canary {pc.university_id} had bad credentials, moving to next candidate.")
                                 pc_client.close()
+                                pc_client = None
                             elif pc_status == "PORTAL_DOWN":
                                 if pc_client:
                                     pc_client.close()
@@ -174,7 +176,7 @@ async def run_check_all_grades():
 
                         ids = course.get("assessment_ids", {})
                         if ids:
-                            detail_html = portal_client.get_assessment_detail_html(
+                            detail_html = await asyncio.to_thread(portal_client.get_assessment_detail_html,
                                 ids["academicYearId"], ids["semesterId"], ids["courseId"]
                             )
                             if detail_html:
@@ -210,10 +212,10 @@ async def run_check_all_grades():
                         for u in other_users:
                             u_pw = await user_service.get_decrypted_password(u)
                             u_client = PortalLoginClient()
-                            login_status = u_client.login(u.university_id, u_pw)
+                            u_login_status, u_html = await asyncio.to_thread(u_client.login, u.university_id, u_pw)
                             
-                            if login_status == "SUCCESS":
-                                u_res = parser.parse_grade_report(u_client.get_grade_report_html())
+                            if u_login_status == "SUCCESS":
+                                u_res = parser.parse_grade_report(u_html)
                                 u_courses = u_res["courses"]
                                 u_summaries = u_res["summaries"]
                                 u_course_codes = {c['course_code'] for c in u_courses}
@@ -237,7 +239,7 @@ async def run_check_all_grades():
                                     
                                     c_ids = c.get("assessment_ids", {})
                                     if c_ids:
-                                        c_detail = u_client.get_assessment_detail_html(c_ids["academicYearId"], c_ids["semesterId"], c_ids["courseId"])
+                                        c_detail = await asyncio.to_thread(u_client.get_assessment_detail_html, c_ids["academicYearId"], c_ids["semesterId"], c_ids["courseId"])
                                         if c_detail:
                                             a_data = parser.parse_assessment_detail(c_detail)
                                             u_has_changed, u_msg = await grade_service.update_or_create_assessment(u.telegram_id, c, a_data)
@@ -245,14 +247,15 @@ async def run_check_all_grades():
                                                 await notification_service.send_notification(u.telegram_id, u_msg)
                                 
                                 for code in (canary_course_codes - u_course_codes):
+                                    esc_code = html.escape(code)
                                     await notification_service.send_notification(
                                         u.telegram_id, 
-                                        f"ℹ️ Grade for {code} is released for {course_release_counts.get(code, 1)} other students in your group, but not yet for you. Hang tight!"
+                                        f"ℹ️ Grade for <b>{esc_code}</b> is released for {course_release_counts.get(code, 1)} other students in your group, but not yet for you. Hang tight!"
                                     )
                                 u_client.close()
-                            elif login_status == "BAD_CREDENTIALS":
+                            elif u_login_status == "BAD_CREDENTIALS":
                                 u.is_credential_valid = False
-                                await notification_service.send_notification(u.telegram_id, "⚠️ Background check failed: **Invalid Portal Credentials**. Background checking is now **suspended** for your account. Please update your password using /my_data to resume tracking.")
+                                await notification_service.send_notification(u.telegram_id, "⚠️ Background check failed: <b>Invalid Portal Credentials</b>. Background checking is now <b>suspended</b> for your account. Please update your password using /my_data to resume tracking.")
                                 u_client.close()
                             else:
                                 if u_client: u_client.close()
@@ -281,7 +284,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
             grade_service = GradeService(db)
             notification_service = NotificationService()
             parser = PortalParser()
-            audit = AuditService(db)
+            audit_service = AuditService(db)
 
             # Check portal hours (Portal is down from midnight to 6 AM East Africa Time)
             from datetime import datetime
@@ -294,7 +297,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                 logger.info(f"Manual grade check skipped for user {telegram_id}: Portal is in maintenance hours (current hour: {current_hour}).")
                 await notification_service.send_notification(
                     telegram_id, 
-                    f"⏰ The AAU portal is currently under maintenance (midnight - 6 AM). Please try again after 6:00 AM. Current time: {current_time.strftime('%I:%M %p')}"
+                    f"⏰ The AAU portal is currently under maintenance (midnight - 6 AM). Please try again after 6:00 AM. Current time: <code>{html.escape(current_time.strftime('%I:%M %p'))}</code>"
                 )
                 await notification_service.close()
                 return
@@ -314,7 +317,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                 try:
                     portal_client = PortalLoginClient()
                     logger.info(f"⏳ Attempting portal login for {user.university_id}... (Attempt {attempt + 1}/{max_retries})")
-                    login_status, html = portal_client.login(user.university_id, password)
+                    login_status, html = await asyncio.to_thread(portal_client.login, user.university_id, password)
                     
                     if login_status == "SUCCESS":
                         logger.info("🔑 Login successful. Parsing grades...")
@@ -353,7 +356,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                                 # Detail
                                 ids = course.get("assessment_ids", {})
                                 if ids:
-                                    detail_html = portal_client.get_assessment_detail_html(
+                                    detail_html = await asyncio.to_thread(portal_client.get_assessment_detail_html,
                                         ids["academicYearId"], ids["semesterId"], ids["courseId"]
                                     )
                                     if detail_html:
@@ -363,7 +366,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                                         )
                                         if has_changed and msg:
                                             updates_found += 1
-                                            await audit.log("GRADE_UPDATED", telegram_id, {"course": course['course_code'], "type": "detail"})
+                                            await audit_service.log("GRADE_UPDATED", telegram_id, {"course": course['course_code'], "type": "detail"})
                                             await notification_service.send_notification(telegram_id, msg)
                             
                             await db.commit()
@@ -374,18 +377,18 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                                 if not matching:
                                     await notification_service.send_notification(
                                         telegram_id,
-                                        f"📭 **Year Results Not Found**\n\n"
-                                        f"I checked the portal but couldn't find any results for **{requested_year}**.\n\n"
+                                        f"📭 <b>Year Results Not Found</b>\n\n"
+                                        f"I checked the portal but couldn't find any results for <b>{html.escape(requested_year)}</b>.\n\n"
                                         f"This usually means:\n"
                                         f"• Results for this year haven't been released yet.\n"
                                         f"• You haven't reached this academic year level yet.\n\n"
-                                        f"Try checking **✨ All Years** to see what's currently available."
+                                        f"Try checking <b>✨ All Years</b> to see what's currently available."
                                     )
                                     portal_client.close()
                                     break
 
                             if updates_found == 0:
-                                await notification_service.send_notification(telegram_id, f"✅ Portal check for **{requested_year}** finished. No new updates found.")
+                                await notification_service.send_notification(telegram_id, f"✅ Portal check for <b>{html.escape(requested_year)}</b> finished. No new updates found.")
                             else:
                                 await notification_service.send_notification(telegram_id, f"✅ Portal check finished. Applied {updates_found} updates.")
                         
@@ -396,7 +399,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                     elif login_status == "BAD_CREDENTIALS":
                         user.is_credential_valid = False
                         await db.commit()
-                        await notification_service.send_notification(telegram_id, "❌ **Login failed!** Your portal credentials appear to be incorrect.\n\nBackground checking has been **suspended**. Please update them using /my_data.")
+                        await notification_service.send_notification(telegram_id, "❌ <b>Login failed!</b> Your portal credentials appear to be incorrect.\n\nBackground checking has been <b>suspended</b>. Please update them using /my_data.")
                         portal_client.close()
                         break  # Don't retry for bad credentials
                     
@@ -405,7 +408,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                         if attempt < max_retries - 1:
                             delay = retry_delays[attempt]
                             logger.warning(f"Portal down. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
-                            await notification_service.send_notification(telegram_id, f"⚠️ Portal is down. Retrying in {delay // 60} minutes... (Attempt {attempt + 1}/{max_retries})")
+                            await notification_service.send_notification(telegram_id, f"⚠️ Portal is down. Retrying in <b>{delay // 60} minutes</b>... (Attempt {attempt + 1}/{max_retries})")
                             await asyncio.sleep(delay)
                         else:
                             logger.error(f"Portal down after {max_retries} attempts. Giving up.")
@@ -416,7 +419,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                     if portal_client:
                         portal_client.close()
                     if attempt == max_retries - 1:
-                        await notification_service.send_notification(telegram_id, f"❌ An error occurred while checking grades: {str(e)}")
+                        await notification_service.send_notification(telegram_id, f"❌ An error occurred while checking grades: <code>{html.escape(str(e))}</code>")
                     break
             
             await notification_service.close()

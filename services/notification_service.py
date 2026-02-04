@@ -19,7 +19,7 @@ class NotificationService:
             return
 
         try:
-            await self.bot.send_message(chat_id=telegram_id, text=message, parse_mode="Markdown")
+            await self.bot.send_message(chat_id=telegram_id, text=message, parse_mode="HTML")
             logger.info(f"Notification sent to {telegram_id}")
         except Exception as e:
             logger.error(f"Failed to send notification to {telegram_id}: {e}")

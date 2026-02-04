@@ -9,11 +9,7 @@ class PortalLoginClient:
     def __init__(self, base_url: str = "https://portal.aau.edu.et"):
         self.base_url = base_url
         self.session = requests.Session()
-        # 🧪 match test.py behavior: standard User-Agent, no extra headers
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-        })
-        self.timeout = 60 # Stay at 60 for Render latency
+        # 🧪 Match test.py exactly: Use default headers (python-requests/2.x.x)
 
     def login(self, username: str, password: str) -> Tuple[str, Optional[str]]:
         """
@@ -24,7 +20,7 @@ class PortalLoginClient:
         try:
             # 1. Get login page to extract CSRF token
             login_url = f"{self.base_url}/login"
-            response = self.session.get(login_url, timeout=self.timeout)
+            response = self.session.get(login_url)
             
             if response.status_code != 200 or "Server is not available" in response.text:
                 return "PORTAL_DOWN", None
@@ -44,11 +40,11 @@ class PortalLoginClient:
             }
             
             # Match test.py: Direct post followed by verify
-            self.session.post(login_url, data=payload, timeout=self.timeout)
+            self.session.post(login_url, data=payload)
             
             # 3. Verify success and get HTML in one go (Efficiency!)
             report_url = f"{self.base_url}/Grade/GradeReport"
-            response = self.session.get(report_url, timeout=self.timeout)
+            response = self.session.get(report_url)
             
             if "login" in response.url.lower() or "login" in response.text.lower()[0:2000]:
                 logger.warning(f"Login failed for user {username}")
@@ -62,7 +58,7 @@ class PortalLoginClient:
     def get_grade_report_html(self) -> Optional[str]:
         """Manual fetch if already logged in"""
         try:
-            response = self.session.get(f"{self.base_url}/Grade/GradeReport", timeout=self.timeout)
+            response = self.session.get(f"{self.base_url}/Grade/GradeReport")
             if response.status_code == 200 and "login" not in response.url.lower():
                 return response.text
             return None
@@ -78,7 +74,7 @@ class PortalLoginClient:
                 "semesterId": sem_id,
                 "courseId": course_id
             }
-            response = self.session.get(url, params=params, timeout=self.timeout)
+            response = self.session.get(url, params=params)
             if response.status_code == 200:
                 return response.text
             return None
