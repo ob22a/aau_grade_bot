@@ -16,6 +16,10 @@ async def main():
         logger.error("BOT_TOKEN not found!")
         return
 
+    # CRITICAL: Run Database Migrations to ensure production schema has encryption columns
+    from database.migrations import run_migrations
+    await run_migrations()
+
     bot = Bot(token=token)
     dp = Dispatcher()
     dp.include_router(router)
