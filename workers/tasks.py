@@ -397,36 +397,36 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                                 await notification_service.send_notification(telegram_id, f"✅ Portal check for **{requested_year}** finished. No new updates found.")
                             else:
                                 await notification_service.send_notification(telegram_id, f"✅ Portal check finished. Applied {updates_found} updates.")
-                            
-                            # Success - cleanup and break out of retry loop
-                            portal_client.close()
-                            break
                         
-                        elif login_status == "BAD_CREDENTIALS":
-                            user.is_credential_valid = False
-                            await db.commit()
-                            await notification_service.send_notification(telegram_id, "❌ **Login failed!** Your portal credentials appear to be incorrect.\n\nBackground checking has been **suspended**. Please update them using /my_data.")
-                            portal_client.close()
-                            break  # Don't retry for bad credentials
-                        
-                        else:  # PORTAL_DOWN
-                            portal_client.close()
-                            if attempt < max_retries - 1:
-                                delay = retry_delays[attempt]
-                                logger.warning(f"Portal down. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
-                                await notification_service.send_notification(telegram_id, f"⚠️ Portal is down. Retrying in {delay // 60} minutes... (Attempt {attempt + 1}/{max_retries})")
-                                await asyncio.sleep(delay)
-                            else:
-                                logger.error(f"Portal down after {max_retries} attempts. Giving up.")
-                                await notification_service.send_notification(telegram_id, "❌ The portal is currently down. I've tried multiple times but couldn't connect. I'll try again during the next scheduled check.")
-                                
-                    except Exception as e:
-                        logger.error(f"Unexpected error during grade check: {e}")
-                        if portal_client:
-                            portal_client.close()
-                        if attempt == max_retries - 1:
-                            await notification_service.send_notification(telegram_id, f"❌ An error occurred while checking grades: {str(e)}")
+                        # Success - cleanup and break out of retry loop
+                        portal_client.close()
                         break
+                    
+                    elif login_status == "BAD_CREDENTIALS":
+                        user.is_credential_valid = False
+                        await db.commit()
+                        await notification_service.send_notification(telegram_id, "❌ **Login failed!** Your portal credentials appear to be incorrect.\n\nBackground checking has been **suspended**. Please update them using /my_data.")
+                        portal_client.close()
+                        break  # Don't retry for bad credentials
+                    
+                    else:  # PORTAL_DOWN
+                        portal_client.close()
+                        if attempt < max_retries - 1:
+                            delay = retry_delays[attempt]
+                            logger.warning(f"Portal down. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                            await notification_service.send_notification(telegram_id, f"⚠️ Portal is down. Retrying in {delay // 60} minutes... (Attempt {attempt + 1}/{max_retries})")
+                            await asyncio.sleep(delay)
+                        else:
+                            logger.error(f"Portal down after {max_retries} attempts. Giving up.")
+                            await notification_service.send_notification(telegram_id, "❌ The portal is currently down. I've tried multiple times but couldn't connect. I'll try again during the next scheduled check.")
+                            
+                except Exception as e:
+                    logger.error(f"Unexpected error during grade check: {e}")
+                    if portal_client:
+                        portal_client.close()
+                    if attempt == max_retries - 1:
+                        await notification_service.send_notification(telegram_id, f"❌ An error occurred while checking grades: {str(e)}")
+                    break
             
             await notification_service.close()
     except Exception as e:
