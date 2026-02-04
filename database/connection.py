@@ -29,10 +29,13 @@ if "?" in DATABASE_URL:
     new_query = urlencode(params, doseq=True)
     DATABASE_URL = f"{base_url}?{new_query}" if new_query else base_url
 
-# For Neon, we usually need to enforce SSL via connect_args for asyncpg
+# For Neon/Render, we enforce SSL and disable statement caching to prevent stale plans during migrations
 engine = create_async_engine(
     DATABASE_URL, 
-    connect_args={"ssl": True} if "neon.tech" in DATABASE_URL else {},
+    connect_args={
+        "ssl": True if "neon.tech" in DATABASE_URL else False,
+        "prepared_statement_cache_size": 0 
+    },
     pool_recycle=300,        # Recycle connections every 5 mins
     pool_pre_ping=True,      # Check connection health before use
     echo=True
