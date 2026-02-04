@@ -39,7 +39,7 @@ async def cmd_start(message: Message, state: FSMContext):
             ])
             await message.answer(
                 f"👋 <b>Welcome back!</b>\n\n"
-                f"Logged in as: <tg-spoiler><code>{html.escape(user.university_id)}</code></tg-spoiler>\n"
+                f"Logged in as: <tg-spoiler>{html.escape(user.university_id)}</tg-spoiler>\n"
                 f"Department: <code>{html.escape(user.department_id)}</code>\n"
                 f"Status: <code>{html.escape(user.academic_year)}, {html.escape(user.semester)}</code>\n\n"
                 "You can use the buttons below or /check_grades and /my_data commands.",
@@ -102,7 +102,7 @@ async def process_department(message: Message, state: FSMContext):
 
     await message.answer(
         f"✅ <b>Registration complete!</b>\n\n"
-        f"University ID: <tg-spoiler><code>{user.university_id}</code></tg-spoiler>\n"
+        f"University ID: <tg-spoiler>{user.university_id}</tg-spoiler>\n"
         f"Department: <code>{user.department_id}</code>\n\n"
         "⚡ <b>Initial Sync Started</b>\n"
         "I'm now fetching your historical grades from the portal for the first time. This usually takes 1-2 minutes.\n\n"
@@ -146,8 +146,8 @@ async def cmd_my_data(message: Message, user_id: int = None):
         
         text = (
             f"👤 <b>Your Data</b>\n\n"
-            f"University ID: <tg-spoiler><code>{html.escape(user.university_id)}</code></tg-spoiler>\n"
-            f"Password: <tg-spoiler><code>{html.escape(password or '********')}</code></tg-spoiler>\n"
+            f"University ID: <tg-spoiler>{html.escape(user.university_id)}</tg-spoiler>\n"
+            f"Password: <tg-spoiler>{html.escape(password or '********')}</tg-spoiler>\n"
             f"Department: <code>{html.escape(user.department_id)}</code>\n"
             f"Campus: <code>{html.escape(user.campus_id)}</code>\n"
             f"Academic Status: <code>{html.escape(user.academic_year)}, {html.escape(user.semester)}</code>"
@@ -173,7 +173,7 @@ async def process_uni_id_update(message: Message, state: FSMContext):
         await user_service.update_university_id(message.from_user.id, new_id)
         await db.commit()
     
-    await message.answer(f"✅ University ID updated to: <tg-spoiler><code>{html.escape(new_id)}</code></tg-spoiler>\n\nI'm triggering an update sync to verify your new ID...", parse_mode="HTML")
+    await message.answer(f"✅ University ID updated to: <tg-spoiler>{html.escape(new_id)}</tg-spoiler>\n\nI'm triggering an update sync to verify your new ID...", parse_mode="HTML")
     
     from workers.tasks import run_check_user_grades
     asyncio.create_task(run_check_user_grades(message.from_user.id, "All"))
@@ -495,9 +495,9 @@ async def cmd_encrypt_db(message: Message):
             enc_grade, iv = encryption_service.encrypt_string(g.grade)
             g.grade = enc_grade
             g.iv = iv
-            if g.course_name: g.course_name, _ = encryption_service.encrypt_string(g.course_name)
-            if g.credit_hour: g.credit_hour, _ = encryption_service.encrypt_string(g.credit_hour)
-            if g.ects: g.ects, _ = encryption_service.encrypt_string(g.ects)
+            if g.course_name: g.course_name, _ = encryption_service.encrypt_string(g.course_name, iv_b64=iv)
+            if g.credit_hour: g.credit_hour, _ = encryption_service.encrypt_string(g.credit_hour, iv_b64=iv)
+            if g.ects: g.ects, _ = encryption_service.encrypt_string(g.ects, iv_b64=iv)
             success_count += 1
 
         # 2. Migrate Assessments
@@ -517,8 +517,8 @@ async def cmd_encrypt_db(message: Message):
         for s in results:
             enc_sgpa, iv = encryption_service.encrypt_string(s.sgpa)
             s.sgpa = enc_sgpa
-            s.cgpa, _ = encryption_service.encrypt_string(s.cgpa)
-            s.status, _ = encryption_service.encrypt_string(s.status)
+            s.cgpa, _ = encryption_service.encrypt_string(s.cgpa, iv_b64=iv)
+            s.status, _ = encryption_service.encrypt_string(s.status, iv_b64=iv)
             s.iv = iv
             success_count += 1
             

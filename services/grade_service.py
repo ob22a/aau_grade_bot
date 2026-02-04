@@ -161,10 +161,10 @@ class GradeService:
         message = ""
         
         if not existing:
-            # Encrypt fields
-            enc_sgpa, iv_sgpa = self.encryption_service.encrypt_string(summary_data["sgpa"])
-            enc_cgpa, iv_cgpa = self.encryption_service.encrypt_string(summary_data["cgpa"])
-            enc_status, iv_status = self.encryption_service.encrypt_string(summary_data["status"])
+            # Encrypt fields using a single IV
+            enc_sgpa, iv = self.encryption_service.encrypt_string(summary_data["sgpa"])
+            enc_cgpa, _ = self.encryption_service.encrypt_string(summary_data["cgpa"], iv_b64=iv)
+            enc_status, _ = self.encryption_service.encrypt_string(summary_data["status"], iv_b64=iv)
             
             new_res = SemesterResult(
                 telegram_id=telegram_id,
@@ -175,10 +175,7 @@ class GradeService:
                 sgpa=enc_sgpa,
                 cgpa=enc_cgpa,
                 status=enc_status,
-                iv=iv_sgpa # We'll re-use SGPA IV or technically we should have separate IVs per field
-                # but for simplicity since we store one IV column we'll concatenate or use a strategy.
-                # Actually, let's just encrypt the whole thing as a JSON-like object or concatenate.
-                # BETTER: encrypt strings separately but for single IV column, use one IV for all.
+                iv=iv 
             )
             # Re-design: Use the same IV for all strings in a row. decryption_service supports this.
             iv = iv_sgpa # or any
@@ -193,10 +190,10 @@ class GradeService:
             if existing.sgpa != summary_data["sgpa"] or existing.cgpa != summary_data["cgpa"] or existing.status != summary_data["status"]:
                 old_sgpa = existing.sgpa
                 
-                # Encrypt new values
+                # Encrypt new values using a single IV
                 enc_sgpa, iv = self.encryption_service.encrypt_string(summary_data["sgpa"])
-                enc_cgpa, _ = self.encryption_service.encrypt_string(summary_data["cgpa"])
-                enc_status, _ = self.encryption_service.encrypt_string(summary_data["status"])
+                enc_cgpa, _ = self.encryption_service.encrypt_string(summary_data["cgpa"], iv_b64=iv)
+                enc_status, _ = self.encryption_service.encrypt_string(summary_data["status"], iv_b64=iv)
                 
                 existing.sgpa = enc_sgpa
                 existing.cgpa = enc_cgpa
@@ -235,10 +232,11 @@ class GradeService:
 
         if not existing:
             # Encrypt values during creation
+            # Encrypt values using a single IV
             enc_grade, iv = self.encryption_service.encrypt_string(new_grade_str)
-            enc_name, _ = self.encryption_service.encrypt_string(course_data.get("course_name", ""))
-            enc_ch, _ = self.encryption_service.encrypt_string(course_data.get("credit_hour", ""))
-            enc_ects, _ = self.encryption_service.encrypt_string(course_data.get("ects", ""))
+            enc_name, _ = self.encryption_service.encrypt_string(course_data.get("course_name", ""), iv_b64=iv)
+            enc_ch, _ = self.encryption_service.encrypt_string(course_data.get("credit_hour", ""), iv_b64=iv)
+            enc_ects, _ = self.encryption_service.encrypt_string(course_data.get("ects", ""), iv_b64=iv)
 
             new_grade = Grade(
                 telegram_id=telegram_id,
@@ -265,12 +263,12 @@ class GradeService:
             if existing.grade != new_grade_str:
                 old_grade = existing.grade
                 
-                # Encrypt new grade
+                # Encrypt new grade and update names/metadata with SAME iv
                 enc_grade, iv = self.encryption_service.encrypt_string(new_grade_str)
                 existing.grade = enc_grade
                 existing.iv = iv
                 # Also refresh other fields if they might have changed
-                enc_name, _ = self.encryption_service.encrypt_string(course_data.get("course_name", ""))
+                enc_name, _ = self.encryption_service.encrypt_string(course_data.get("course_name", ""), iv_b64=iv)
                 existing.course_name = enc_name
 
                 existing.last_updated_at = datetime.utcnow()

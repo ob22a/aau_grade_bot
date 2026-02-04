@@ -17,14 +17,18 @@ class EncryptionService:
             raise ValueError("ENCRYPTION_KEY not found in environment")
         self.key = base64.b64decode(key_str)
 
-    def encrypt_string(self, text: str) -> Tuple[str, str]:
+    def encrypt_string(self, text: str, iv_b64: str = None) -> Tuple[str, str]:
         """
         Returns (encrypted_base64, iv_base64)
         """
         if not text:
             return "", ""
             
-        iv = os.urandom(16)
+        if iv_b64:
+            iv = base64.b64decode(iv_b64)
+        else:
+            iv = os.urandom(16)
+            
         cipher = Cipher(algorithms.AES(self.key), modes.CBC(iv), backend=default_backend())
         encryptor = cipher.encryptor()
         
