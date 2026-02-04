@@ -187,7 +187,7 @@ class GradeService:
             has_changed = True
             yr = self.escape_html(summary_data['academic_year'])
             sem = self.escape_html(summary_data['semester'])
-                message = f"📊 Semester Results released! <b>{yr} {sem}</b>\nSGPA: <code>{summary_data['sgpa']}</code> | CGPA: <code>{summary_data['cgpa']}</code>\nStatus: <i>{summary_data['status']}</i>"
+            message = f"📊 Semester Results released! <b>{yr} {sem}</b>\nSGPA: <code>{summary_data['sgpa']}</code> | CGPA: <code>{summary_data['cgpa']}</code>\nStatus: <i>{summary_data['status']}</i>"
         else:
             # Note: existing is already decrypted at the start of method
             if existing.sgpa != summary_data["sgpa"] or existing.cgpa != summary_data["cgpa"] or existing.status != summary_data["status"]:
@@ -256,7 +256,7 @@ class GradeService:
                 iv=iv
             )
             self.db.add(new_grade)
-                # We only notify if the grade is actually something (not NG or empty)
+            # We only notify if the grade is actually something (not NG or empty)
             if new_grade_str and new_grade_str not in ["", "NG"]:
                 has_changed = True
                 name = self.escape_html(course_data['course_name'])
