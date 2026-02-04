@@ -22,11 +22,40 @@ class GradeService:
         data_str = json.dumps(assessment_data, sort_keys=True)
         return hashlib.sha256(data_str.encode()).hexdigest()
 
+    @staticmethod
+    def matches_year(item: Dict[str, Any], query: str) -> bool:
+        """
+        In-memory check if a parsed course/summary matches the year query.
+        """
+        if query == "All":
+            return True
+            
+        full = (item.get("academic_year") or "").lower()
+        level = (item.get("year_level") or "").lower()
+        num = str(item.get("year_number") or "")
+        
+        q = query.lower().replace("year", "").strip()
+        roman_map = {"1": "i", "2": "ii", "3": "iii", "4": "iv", "5": "v"}
+        roman = roman_map.get(q, q)
+        
+        return (
+            q in full or 
+            q in level or 
+            roman in full or 
+            roman in level or 
+            (q.isdigit() and q == num)
+        )
+
     async def get_stored_assessment(self, telegram_id: int, course_id: str) -> Optional[Assessment]:
         stmt = select(Assessment).where(
             Assessment.telegram_id == telegram_id,
             Assessment.course_id == course_id
         )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_assessment_by_id(self, assessment_id: int) -> Optional[Assessment]:
+        stmt = select(Assessment).where(Assessment.id == assessment_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -76,6 +105,8 @@ class GradeService:
                 course_id=course_id,
                 academic_year=course_data["academic_year"],
                 semester=course_data["semester"],
+                year_level=course_data.get("year_level"),
+                year_number=course_data.get("year_number"),
                 assessment_data=assessment_data
             )
             self.db.add(new_assessment)
@@ -121,6 +152,8 @@ class GradeService:
                 telegram_id=telegram_id,
                 academic_year=summary_data["academic_year"],
                 semester=summary_data["semester"],
+                year_level=summary_data.get("year_level"),
+                year_number=summary_data.get("year_number"),
                 sgpa=summary_data["sgpa"],
                 cgpa=summary_data["cgpa"],
                 status=summary_data["status"]
@@ -167,9 +200,14 @@ class GradeService:
                 campus_id=course_data.get("campus_id", "CTBE"),
                 department_id=course_data.get("department_id", "SITE"),
                 course_id=course_id,
+                course_name=course_data.get("course_name"),
                 academic_year=course_data["academic_year"],
                 semester=course_data["semester"],
-                grade=new_grade_str
+                year_level=course_data.get("year_level"),
+                year_number=course_data.get("year_number"),
+                grade=new_grade_str,
+                credit_hour=course_data.get("credit_hour"),
+                ects=course_data.get("ects")
             )
             self.db.add(new_grade)
             # We only notify if the grade is actually something (not NG or empty)
@@ -186,27 +224,36 @@ class GradeService:
 
         return has_changed, message
 
-    async def get_year_results(self, telegram_id: int, academic_year: str = "All") -> Dict[str, Any]:
+    async def get_year_results(self, telegram_id: int, year_query: str = "All") -> Dict[str, Any]:
         """
-        Retrieves all stored grades (Grade table) and semester summaries for a user.
+        Retrieves all stored grades and semester summaries for a user with flexible year matching.
         """
-        from database.models import User, Grade
-        # Get user
-        stmt = select(User).where(User.telegram_id == telegram_id)
-        user = (await self.db.execute(stmt)).scalar_one_or_none()
-        if not user:
-            return {"grades": [], "summaries": []}
-
         # Final Grades
         grade_stmt = select(Grade).where(Grade.telegram_id == telegram_id)
-        if academic_year != "All":
-            grade_stmt = grade_stmt.where(Grade.academic_year.contains(academic_year))
+        
+        if year_query != "All":
+            # Flexible matching for "Year 3", "3", "III", etc.
+            normalized = year_query.lower().replace("year", "").strip()
+            roman_map = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V"}
+            roman = roman_map.get(normalized, normalized.upper())
+            
+            grade_stmt = grade_stmt.where(
+                (Grade.academic_year.ilike(f"%{year_query}%")) |
+                (Grade.year_level.ilike(f"%{year_query}%")) |
+                (Grade.year_level.ilike(f"%{roman}%"))
+            )
+            
+            if normalized.isdigit():
+                grade_stmt = grade_stmt.where(Grade.year_number == int(normalized))
+
         grades = (await self.db.execute(grade_stmt)).scalars().all()
 
         # Summaries
         summary_stmt = select(SemesterResult).where(SemesterResult.telegram_id == telegram_id)
-        if academic_year != "All":
-            summary_stmt = summary_stmt.where(SemesterResult.academic_year.contains(academic_year))
+        if year_query != "All":
+            # We don't have year_number in SemesterResult yet, but we can match by string
+            summary_stmt = summary_stmt.where(SemesterResult.academic_year.ilike(f"%{year_query}%"))
+            
         summaries = (await self.db.execute(summary_stmt)).scalars().all()
 
         return {
@@ -214,38 +261,100 @@ class GradeService:
             "summaries": summaries
         }
 
-    @staticmethod
-    def format_grade_report(results: Dict[str, Any], title: str) -> str:
+    async def get_assessments_for_grades(self, telegram_id: int, grades: List[Grade]) -> Dict[str, Assessment]:
         """
-        Formats results into a clean Telegram message.
+        Fetches matching assessments for a list of grades.
+        """
+        results = {}
+        for g in grades:
+            # Look up assessment by course code and period
+            stmt = select(Assessment).where(
+                Assessment.telegram_id == telegram_id,
+                Assessment.course_id == g.course_id,
+                Assessment.academic_year == g.academic_year,
+                Assessment.semester == g.semester
+            )
+            res = await self.db.execute(stmt)
+            assessment = res.scalar_one_or_none()
+            if assessment:
+                results[str(g.id)] = assessment
+        return results
+
+    @staticmethod
+    def format_grade_report(results: Dict[str, Any], title: str) -> List[Dict[str, Any]]:
+        """
+        Formats results into structured data for the handler to send.
+        Returns a list of chunks (one per semester) to avoid Telegram message limits.
         """
         grades = results["grades"]
         summaries = results["summaries"]
 
         if not grades and not summaries:
-            return f"📭 No data found in database for **{title}**.\n\nPlease use the button below to fetch from the portal."
+            return [{
+                "text": f"📭 No results found for **{title}**.\n\nThis could mean:\n• Results haven't been released yet\n• You haven't reached that year level\n• Try checking 'All' years.",
+                "kb_data": None
+            }]
 
-        msg = f"📊 **Grade Report: {title}**\n\n"
-
+        chunks = []
+        
         # Group by Year/Semester
         grouped: Dict[str, List[Grade]] = {}
         for g in grades:
-            key = f"{g.academic_year} - {g.semester}"
+            key = f"{g.year_level or g.academic_year} - {g.semester}"
             grouped.setdefault(key, []).append(g)
 
-        for period in sorted(grouped.keys()):
-            msg += f"🗓 **{period}**\n"
-            period_grades = grouped[period]
-            for g in period_grades:
-                grade_val = g.grade or "??"
-                msg += f"• `{g.course_id}`: **{grade_val}**\n"
-            
-            # Find summary for this period
-            # Period format: "Year X - Semester Y"
-            period_summaries = [s for s in summaries if s.academic_year in period and s.semester in period]
-            if period_summaries:
-                s = period_summaries[0]
-                msg += f"   └ SGPA: `{s.sgpa or 'N/A'}` | CGPA: `{s.cgpa or 'N/A'}`\n"
-            msg += "\n"
+        # Sort keys reliably? Ideally by year/semester order.
+        # For now alphabetical but Year I < Year II
+        sorted_keys = sorted(grouped.keys())
 
+        for period in sorted_keys:
+            msg = f"📚 **{period}**\n\n"
+            period_grades = grouped[period]
+            
+            buttons = []
+            for idx, g in enumerate(period_grades, 1):
+                emoji = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"][idx-1] if idx <= 10 else "🔹"
+                grade_val = g.grade if g.grade and g.grade != "NG" else "Pending"
+                
+                msg += f"{emoji} **{g.course_name or g.course_id}**\n"
+                msg += f"   Code: `{g.course_id}` | Grade: **{grade_val}**\n\n"
+                
+                buttons.append({"text": f"📊 {g.course_id}", "callback_data": f"view_asms_{g.id}"})
+
+            # Check for summary
+            summary = next((s for s in summaries if s.academic_year in period or s.semester in period), None)
+            if summary:
+                msg += f"📈 **Summary**\n"
+                msg += f"SGPA: `{summary.sgpa or '0.00'}` | CGPA: `{summary.cgpa or '0.00'}`\n"
+                msg += f"Status: _{summary.status or 'N/A'}_\n"
+
+            chunks.append({
+                "text": msg,
+                "buttons": buttons
+            })
+
+        return chunks
+
+    @staticmethod
+    def format_assessment_detail(grade: Grade, assessment: Assessment) -> str:
+        """
+        Formats assessment breakdown for a course.
+        """
+        msg = f"📊 **{grade.course_name or grade.course_id}**\n"
+        msg += f"Code: `{grade.course_id}`\n"
+        msg += f"Final Grade: **{grade.grade or 'N/A'}**\n\n"
+        
+        msg += "📝 **Assessment Breakdown:**\n"
+        data = assessment.assessment_data
+        
+        grades = data.get("grades", [])
+        if not grades:
+            msg += "   _No breakdown available_\n"
+        else:
+            for g in grades:
+                msg += f"• {g['name']} ({g.get('weight', '??')}): **{g['result']}**\n"
+        
+        total = data.get("totalMark", "N/A")
+        msg += f"\n✅ **Total:** `{total}`"
+        
         return msg

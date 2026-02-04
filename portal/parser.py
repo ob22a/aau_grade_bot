@@ -4,7 +4,6 @@ from typing import List, Dict, Any
 
 class PortalParser:
     @staticmethod
-    @staticmethod
     def parse_grade_report(html_content: str) -> Dict[str, Any]:
         """
         Parses the main grade report page to get a list of courses and their grades.
@@ -19,6 +18,8 @@ class PortalParser:
         summaries = []
         current_year = ""
         current_semester = ""
+        current_year_level = ""
+        current_year_number = None
 
         rows = table.find_all("tr")
         for row in rows:
@@ -37,6 +38,15 @@ class PortalParser:
                         current_year = year_match.group(1).strip()
                         if year_level_match:
                             current_year += f", {year_level_match.group(1).strip()}"
+                            current_year_level = year_level_match.group(1).strip()
+                            
+                            # Extract numeric year (I->1, II->2, III->3, IV->4, V->5)
+                            year_num_match = re.search(r"Year\s+(I{1,3}|IV|V)", current_year_level)
+                            if year_num_match:
+                                roman = year_num_match.group(1)
+                                roman_to_num = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5}
+                                current_year_number = roman_to_num.get(roman)
+                    
                     if sem_match:
                         current_semester = sem_match.group(1).strip()
                     continue
@@ -52,6 +62,8 @@ class PortalParser:
                     summaries.append({
                         "academic_year": current_year,
                         "semester": current_semester,
+                        "year_level": current_year_level,
+                        "year_number": current_year_number,
                         "sgp": sgp.group(1) if sgp else "0",
                         "sgpa": sgpa.group(1) if sgpa else "0",
                         "cgp": cgp.group(1) if cgp else "0",
@@ -84,6 +96,8 @@ class PortalParser:
                 courses.append({
                     "academic_year": current_year,
                     "semester": current_semester,
+                    "year_level": current_year_level,
+                    "year_number": current_year_number,
                     "course_name": course_name,
                     "course_code": course_code,
                     "credit_hour": credit_hour,

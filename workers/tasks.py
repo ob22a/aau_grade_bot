@@ -341,7 +341,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                         
                         # Check summaries
                         for s in summaries:
-                            if requested_year != "All" and requested_year not in s["academic_year"]:
+                            if not GradeService.matches_year(s, requested_year):
                                 continue
                             h, m = await grade_service.update_or_create_semester_result(user.telegram_id, s)
                             if h and m:
@@ -350,7 +350,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
 
                         # Check courses
                         for course in courses:
-                            if requested_year != "All" and requested_year not in course["academic_year"]:
+                            if not GradeService.matches_year(course, requested_year):
                                 continue
                             # Final Letter
                             gc, gm = await grade_service.update_or_create_grade(user.telegram_id, course)
@@ -375,6 +375,23 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                                         await notification_service.send_notification(telegram_id, msg)
                         
                         await db.commit()
+                        
+                        # Phase 3 detection: If requested a specific year and no courses matched
+                        if requested_year != "All":
+                            matching = [c for c in courses if GradeService.matches_year(c, requested_year)]
+                            if not matching:
+                                await notification_service.send_notification(
+                                    telegram_id,
+                                    f"📭 **Year Results Not Found**\n\n"
+                                    f"I checked the portal but couldn't find any results for **{requested_year}**.\n\n"
+                                    f"This usually means:\n"
+                                    f"• Results for this year haven't been released yet.\n"
+                                    f"• You haven't reached this academic year level yet.\n\n"
+                                    f"Try checking **✨ All Years** to see what's currently available."
+                                )
+                                portal_client.close()
+                                break
+
                         if updates_found == 0:
                             await notification_service.send_notification(telegram_id, f"✅ Portal check for **{requested_year}** finished. No new updates found.")
                         else:

@@ -85,6 +85,8 @@ class Assessment(Base):
     
     academic_year: Mapped[str] = mapped_column(String(50))
     semester: Mapped[str] = mapped_column(String(50))
+    year_level: Mapped[Optional[str]] = mapped_column(String(50))  # "Year III"
+    year_number: Mapped[Optional[int]] = mapped_column()  # 3
     
     assessment_data: Mapped[dict] = mapped_column(JSON)
     last_updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -108,11 +110,16 @@ class Grade(Base):
     campus_id: Mapped[str] = mapped_column(String(50))
     department_id: Mapped[str] = mapped_column(String(50))
     course_id: Mapped[str] = mapped_column(String(50)) # Course Code
+    course_name: Mapped[Optional[str]] = mapped_column(String(255))  # Store course name
     
     academic_year: Mapped[str] = mapped_column(String(50))
     semester: Mapped[str] = mapped_column(String(50))
+    year_level: Mapped[Optional[str]] = mapped_column(String(50))  # "Year III"
+    year_number: Mapped[Optional[int]] = mapped_column()  # 3
     
     grade: Mapped[str] = mapped_column(String(10)) # A, B+, NG, etc.
+    credit_hour: Mapped[Optional[str]] = mapped_column(String(10))  # Store credit hours
+    ects: Mapped[Optional[str]] = mapped_column(String(10))  # Store ECTS
     last_updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class GradeCheckStatus(Base):
@@ -143,6 +150,8 @@ class SemesterResult(Base):
     
     academic_year: Mapped[str] = mapped_column(String(100))
     semester: Mapped[str] = mapped_column(String(50))
+    year_level: Mapped[Optional[str]] = mapped_column(String(50))  # "Year III"
+    year_number: Mapped[Optional[int]] = mapped_column()  # 3
     
     sgpa: Mapped[str] = mapped_column(String(10))
     cgpa: Mapped[str] = mapped_column(String(10))

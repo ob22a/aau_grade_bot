@@ -281,18 +281,57 @@ async def cb_perform_check(callback: CallbackQuery):
         
         # 1. Fetch from DB first
         results = await grade_service.get_year_results(callback.from_user.id, requested_year)
-        report_text = grade_service.format_grade_report(results, requested_year)
+        chunks = grade_service.format_grade_report(results, requested_year)
         
-        # 2. Prepare Refresh Button
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Force Refresh from Portal", callback_data=f"refresh_portal_{requested_year}")]
-        ])
-        
-        await callback.message.edit_text(report_text, reply_markup=kb, parse_mode="Markdown")
-        
+        # Prepare Audit
         from services.audit_service import AuditService
         await AuditService(db).log("VIEW_GRADE_DB", callback.from_user.id, {"year": requested_year})
         await db.commit()
+
+        # 2. Display Chunks
+        for i, chunk in enumerate(chunks):
+            inline_kb = []
+            if chunk.get("buttons"):
+                for btn in chunk["buttons"]:
+                    inline_kb.append([InlineKeyboardButton(text=btn["text"], callback_data=btn["callback_data"])])
+            
+            # Add Refresh button to the last chunk or alone if no results
+            if i == len(chunks) - 1:
+                inline_kb.append([InlineKeyboardButton(text="🔄 Force Refresh from Portal", callback_data=f"refresh_portal_{requested_year}")])
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=inline_kb) if inline_kb else None
+            
+            if i == 0:
+                await callback.message.edit_text(chunk["text"], reply_markup=kb, parse_mode="Markdown")
+            else:
+                await callback.message.answer(chunk["text"], reply_markup=kb, parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("view_asms_"))
+async def cb_view_assessment(callback: CallbackQuery):
+    grade_id = int(callback.data.replace("view_asms_", ""))
+    async with SessionLocal() as db:
+        from services.grade_service import GradeService
+        from database.models import Grade
+        grade_service = GradeService(db)
+        
+        stmt = select(Grade).where(Grade.id == grade_id)
+        grade = (await db.execute(stmt)).scalar_one_or_none()
+        
+        if not grade:
+            await callback.answer("Grade record not found.", show_alert=True)
+            return
+
+        # Try to find assessment matching this grade's course/year/sem
+        # Using flexible lookup from GradeService
+        assessment = await grade_service.get_stored_assessment(callback.from_user.id, grade.course_id)
+        
+        if not assessment:
+            await callback.answer("Detailed assessment info not available in database.\n\nTry Force Refresh!", show_alert=True)
+            return
+
+        report = grade_service.format_assessment_detail(grade, assessment)
+        await callback.message.answer(report, parse_mode="Markdown")
+        await callback.answer()
 
 @router.callback_query(F.data.startswith("refresh_portal_"))
 async def cb_refresh_portal(callback: CallbackQuery):
