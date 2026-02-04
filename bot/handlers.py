@@ -337,8 +337,6 @@ async def cb_view_assessment(callback: CallbackQuery):
 async def cb_refresh_portal(callback: CallbackQuery):
     requested_year = callback.data.replace("refresh_portal_", "")
     
-    await callback.answer("Request received")
-    
     # 30-minute caching check
     from datetime import datetime, timedelta
     from sqlalchemy import desc
@@ -352,22 +350,30 @@ async def cb_refresh_portal(callback: CallbackQuery):
             AuditLog.timestamp > thirty_mins_ago
         ).order_by(desc(AuditLog.timestamp))
         res = await db.execute(stmt)
-        last_check = res.scalar_one_or_none()
+        # 🛡️ Fix: Use .first() instead of .scalar_one_or_none() because logs can have multiple entries
+        last_check = res.scalars().first()
         
         if last_check:
-            # We already answered "Request received", but now we send an alert for the rate limit
             await callback.answer("⏳ Please wait 30 mins between portal refreshes.", show_alert=True)
             return
 
-        await callback.message.answer(f"🔍 Scraping portal for **{requested_year}**... I'll notify you when it's done.", parse_mode="Markdown")
-        
-        # Trigger In-Process Background Task (Render Free Tier)
-        from workers.tasks import run_check_user_grades
-        asyncio.create_task(run_check_user_grades(callback.from_user.id, requested_year))
-        
+        # Log intent first
         from services.audit_service import AuditService
         await AuditService(db).log("VIEW_GRADE_SCRAPE", callback.from_user.id, {"year": requested_year})
         await db.commit()
+
+    # Feedback to user
+    await callback.answer("Scraping started!")
+    await callback.message.answer(
+        f"🔍 **Force Refresh Started** for {requested_year}\n\n"
+        f"I'm connecting to the AAU portal now. This usually takes 30-60 seconds.\n"
+        f"I'll notify you here as soon as I have the latest results! ⏳",
+        parse_mode="Markdown"
+    )
+    
+    # Trigger In-Process Background Task (Render Free Tier)
+    from workers.tasks import run_check_user_grades
+    asyncio.create_task(run_check_user_grades(callback.from_user.id, requested_year))
 
 # --- Admin Interface ---
 
