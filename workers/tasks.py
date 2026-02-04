@@ -87,12 +87,13 @@ async def run_check_all_grades():
                             if not password: continue
                             
                             pc_client = PortalLoginClient()
-                            pc_status = pc_client.login(pc.university_id, password)
+                            pc_status, html = pc_client.login(pc.university_id, password)
                             
                             if pc_status == "SUCCESS":
                                 canary_user = pc
                                 portal_client = pc_client
                                 login_status = pc_status
+                                # html is already populated from login()
                                 break
                             elif pc_status == "BAD_CREDENTIALS":
                                 pc.is_credential_valid = False
@@ -131,7 +132,6 @@ async def run_check_all_grades():
                         if portal_client: portal_client.close()
                         continue
 
-                    html = portal_client.get_grade_report_html()
                     if not html: 
                         if portal_client: portal_client.close()
                         continue
@@ -314,13 +314,11 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                 try:
                     portal_client = PortalLoginClient()
                     logger.info(f"⏳ Attempting portal login for {user.university_id}... (Attempt {attempt + 1}/{max_retries})")
-                    login_status = portal_client.login(user.university_id, password)
+                    login_status, html = portal_client.login(user.university_id, password)
                     
                     if login_status == "SUCCESS":
-                        logger.info("🔑 Login successful. Fetching grade report HTML...")
-                        html = portal_client.get_grade_report_html()
+                        logger.info("🔑 Login successful. Parsing grades...")
                         if html:
-                            logger.info("📄 HTML received. Parsing grades...")
                             res_data = parser.parse_grade_report(html)
                             courses = res_data["courses"]
                             
