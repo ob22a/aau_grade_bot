@@ -9,6 +9,7 @@ from sqlalchemy import select
 import logging
 import os
 import asyncio
+import html
 router = Router()
 logger = logging.getLogger(__name__)
 
@@ -37,13 +38,13 @@ async def cmd_start(message: Message, state: FSMContext):
                 [InlineKeyboardButton(text="⚙️ Manage My Data", callback_data="open_my_data")]
             ])
             await message.answer(
-                f"👋 **Welcome back!**\n\n"
-                f"Logged in as: `{user.university_id}`\n"
-                f"Department: `{user.department_id}`\n"
-                f"Status: `{user.academic_year}, {user.semester}`\n\n"
-                r"You can use the buttons below or /check\_grades and /my\_data commands.",
+                f"👋 <b>Welcome back!</b>\n\n"
+                f"Logged in as: <code>{html.escape(user.university_id)}</code>\n"
+                f"Department: <code>{html.escape(user.department_id)}</code>\n"
+                f"Status: <code>{html.escape(user.academic_year)}, {html.escape(user.semester)}</code>\n\n"
+                "You can use the buttons below or /check_grades and /my_data commands.",
                 reply_markup=kb,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             return
 
@@ -64,13 +65,13 @@ async def cb_open_my_data(callback: CallbackQuery):
 @router.message(RegistrationState.waiting_for_id, ~F.text.startswith("/"))
 async def process_id(message: Message, state: FSMContext):
     await state.update_data(id=message.text)
-    await message.answer("Great! Now enter your **Portal Password** (this will be encrypted safely):")
+    await message.answer("Great! Now enter your <b>Portal Password</b> (this will be encrypted safely):", parse_mode="HTML")
     await state.set_state(RegistrationState.waiting_for_password)
 
 @router.message(RegistrationState.waiting_for_password, ~F.text.startswith("/"))
 async def process_password(message: Message, state: FSMContext):
     await state.update_data(password=message.text)
-    await message.answer("Finally, enter your **Department Abbreviation** (e.g., SITE):")
+    await message.answer("Finally, enter your <b>Department Abbreviation</b> (e.g., SITE):", parse_mode="HTML")
     await state.set_state(RegistrationState.waiting_for_department)
 
 @router.message(RegistrationState.waiting_for_department, ~F.text.startswith("/"))
@@ -144,23 +145,23 @@ async def cmd_my_data(message: Message, user_id: int = None):
         ])
         
         text = (
-            f"👤 **Your Data**\n\n"
-            f"University ID: `{user.university_id}`\n"
-            f"Password: `{password or '********'}`\n"
-            f"Department: `{user.department_id}`\n"
-            f"Campus: `{user.campus_id}`\n"
-            f"Academic Status: `{user.academic_year}, {user.semester}`"
+            f"👤 <b>Your Data</b>\n\n"
+            f"University ID: <code>{html.escape(user.university_id)}</code>\n"
+            f"Password: <code>{html.escape(password or '********')}</code>\n"
+            f"Department: <code>{html.escape(user.department_id)}</code>\n"
+            f"Campus: <code>{html.escape(user.campus_id)}</code>\n"
+            f"Academic Status: <code>{html.escape(user.academic_year)}, {html.escape(user.semester)}</code>"
         )
 
         # If called from a callback, message is the previous message we can edit
         if user_id:
-            await message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+            await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
         else:
-            await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+            await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @router.callback_query(F.data == "change_uni_id")
 async def cb_change_uni_id(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Please enter your new **University ID** (e.g., UGR/1234/16):", parse_mode="Markdown")
+    await callback.message.answer("Please enter your new <b>University ID</b> (e.g., UGR/1234/16):", parse_mode="HTML")
     await state.set_state(RegistrationState.waiting_for_uni_id)
     await callback.answer()
 
@@ -182,7 +183,7 @@ async def process_uni_id_update(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "change_password")
 async def cb_change_password(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Please enter your new **Portal Password**:", parse_mode="Markdown")
+    await callback.message.answer("Please enter your new <b>Portal Password</b>:", parse_mode="HTML")
     await state.set_state(RegistrationState.waiting_for_password_update)
     async with SessionLocal() as db:
         from services.audit_service import AuditService
@@ -209,8 +210,8 @@ async def process_password_update(message: Message, state: FSMContext):
 @router.callback_query(F.data == "change_department")
 async def cb_change_department(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
-        "Please enter your **Department Code** (e.g., SITE, CIVIL, MECHANICAL):",
-        parse_mode="Markdown"
+        "Please enter your <b>Department Code</b> (e.g., SITE, CIVIL, MECHANICAL):",
+        parse_mode="HTML"
     )
     await state.set_state(RegistrationState.waiting_for_dept_update)
     await callback.answer()
@@ -225,7 +226,7 @@ async def process_dept_update(message: Message, state: FSMContext):
             user.department_id = new_dept
             await db.commit()
     
-    await message.answer(f"✅ Department updated to: `{new_dept}`", parse_mode="Markdown")
+    await message.answer(f"✅ Department updated to: <code>{html.escape(new_dept)}</code>", parse_mode="HTML")
     await state.clear()
     await cmd_my_data(message)
 
@@ -237,7 +238,7 @@ async def cb_change_year(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="Year 5", callback_data="set_year_Year 5"), InlineKeyboardButton(text="Year 6", callback_data="set_year_Year 6")],
         [InlineKeyboardButton(text="Year 7", callback_data="set_year_Year 7")]
     ])
-    await callback.message.answer("Select your current **Academic Year**:", reply_markup=kb, parse_mode="Markdown")
+    await callback.message.answer("Select your current <b>Academic Year</b>:", reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "change_sem")
@@ -245,7 +246,7 @@ async def cb_change_sem(callback: CallbackQuery, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Semester One", callback_data="set_sem_One"), InlineKeyboardButton(text="Semester Two", callback_data="set_sem_Two")]
     ])
-    await callback.message.answer("Select your current **Semester**:", reply_markup=kb, parse_mode="Markdown")
+    await callback.message.answer("Select your current <b>Semester</b>:", reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data.startswith("set_year_"))
@@ -255,7 +256,7 @@ async def cb_set_year(callback: CallbackQuery):
         user_service = UserService(db)
         await user_service.update_academic_status(callback.from_user.id, year=year)
         await db.commit()
-    await callback.message.edit_text(f"✅ Academic Year updated to **{year}**.", parse_mode="Markdown")
+    await callback.message.edit_text(f"✅ Academic Year updated to <b>{html.escape(year)}</b>.", parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data.startswith("set_sem_"))
@@ -265,7 +266,7 @@ async def cb_set_sem(callback: CallbackQuery):
         user_service = UserService(db)
         await user_service.update_academic_status(callback.from_user.id, semester=sem)
         await db.commit()
-    await callback.message.edit_text(f"✅ Semester updated to **{sem}**.", parse_mode="Markdown")
+    await callback.message.edit_text(f"✅ Semester updated to <b>{html.escape(sem)}</b>.", parse_mode="HTML")
     await callback.answer()
 
 @router.message(Command("check_grades"))
@@ -288,7 +289,7 @@ async def cmd_check_grades(message: Message):
         [InlineKeyboardButton(text="✨ All Years", callback_data="check_ALL")]
     ])
     
-    await message.answer("Select the **Academic Year** you want to check:", reply_markup=kb, parse_mode="Markdown")
+    await message.answer("Select the <b>Academic Year</b> you want to check:", reply_markup=kb, parse_mode="HTML")
 
 @router.message(Command("refresh"))
 async def cmd_refresh(message: Message):
@@ -330,9 +331,9 @@ async def cb_perform_check(callback: CallbackQuery):
             kb = InlineKeyboardMarkup(inline_keyboard=inline_kb) if inline_kb else None
             
             if i == 0:
-                await callback.message.edit_text(chunk["text"], reply_markup=kb, parse_mode="Markdown")
+                await callback.message.edit_text(chunk["text"], reply_markup=kb, parse_mode="HTML")
             else:
-                await callback.message.answer(chunk["text"], reply_markup=kb, parse_mode="Markdown")
+                await callback.message.answer(chunk["text"], reply_markup=kb, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("view_asms_"))
 async def cb_view_assessment(callback: CallbackQuery):
@@ -358,7 +359,7 @@ async def cb_view_assessment(callback: CallbackQuery):
             return
 
         report = grade_service.format_assessment_detail(grade, assessment)
-        await callback.message.answer(report, parse_mode="Markdown")
+        await callback.message.answer(report, parse_mode="HTML")
         await callback.answer()
 
 @router.callback_query(F.data.startswith("refresh_portal_"))
@@ -392,11 +393,12 @@ async def cb_refresh_portal(callback: CallbackQuery):
 
     # Feedback to user
     await callback.answer("Scraping started!")
+    yr_esc = html.escape(requested_year)
     await callback.message.answer(
-        f"🔍 **Force Refresh Started** for {requested_year}\n\n"
+        f"🔍 <b>Force Refresh Started</b> for {yr_esc}\n\n"
         f"I'm connecting to the AAU portal now. This usually takes 120-180 seconds.\n"
         f"I'll notify you here as soon as I have the latest results! ⏳",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     
     # Trigger In-Process Background Task (Render Free Tier)
@@ -422,13 +424,13 @@ async def cmd_admin(message: Message):
         status = "Enabled" if (not setting or setting.value == "true") else "Disabled"
 
     await message.answer(
-        f"🛠 **Admin Dashboard**\n\n"
-        f"Scheduler Status: **{status}**\n\n"
+        f"🛠 <b>Admin Dashboard</b>\n\n"
+        f"Scheduler Status: <b>{status}</b>\n\n"
         "Commands:\n"
         "/start_service - Enable periodic checks\n"
         "/stop_service - Disable periodic checks\n"
         "/encrypt_db - 🔒 Migrate DB to AES-256",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @router.message(Command("start_service"))
@@ -450,7 +452,7 @@ async def cmd_start_service(message: Message):
         await db.execute(stmt)
         await db.commit()
 
-    await message.answer("✅ Grade checking service **ENABLED**.", parse_mode="Markdown")
+    await message.answer("✅ Grade checking service <b>ENABLED</b>.", parse_mode="HTML")
 
 @router.message(Command("stop_service"))
 async def cmd_stop_service(message: Message):
@@ -471,14 +473,14 @@ async def cmd_stop_service(message: Message):
         await db.execute(stmt)
         await db.commit()
 
-    await message.answer("🛑 Grade checking service **DISABLED**.", parse_mode="Markdown")
+    await message.answer("🛑 Grade checking service <b>DISABLED</b>.", parse_mode="HTML")
 
 @router.message(Command("encrypt_db"))
 async def cmd_encrypt_db(message: Message):
     if not is_admin(message.from_user.id):
         return
 
-    await message.answer("🔐 **Database Encryption Migration Started**\n\nI'm scanning for unencrypted records and securing them with AES-256. This may take a moment...", parse_mode="Markdown")
+    await message.answer("🔐 <b>Database Encryption Migration Started</b>\n\nI'm scanning for unencrypted records and securing them with AES-256. This may take a moment...", parse_mode="HTML")
     
     success_count = 0
     async with SessionLocal() as db:
@@ -522,4 +524,4 @@ async def cmd_encrypt_db(message: Message):
             
         await db.commit()
 
-    await message.answer(f"✅ **Encryption Complete!**\n\nSecured `{success_count}` records with AES-256-CBC.", parse_mode="Markdown")
+    await message.answer(f"✅ <b>Encryption Complete!</b>\n\nSecured <code>{success_count}</code> records with AES-256-CBC.", parse_mode="HTML")
