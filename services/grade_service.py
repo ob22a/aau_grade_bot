@@ -177,9 +177,6 @@ class GradeService:
                 status=enc_status,
                 iv=iv 
             )
-            # Re-design: Use the same IV for all strings in a row. decryption_service supports this.
-            iv = iv_sgpa # or any
-            # Actually our model only has ONE IV column. Let's stick to that.
             self.db.add(new_res)
             has_changed = True
             yr = self.escape_html(summary_data['academic_year'])
