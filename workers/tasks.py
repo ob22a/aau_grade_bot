@@ -88,13 +88,13 @@ async def run_check_all_grades():
                             if not password: continue
                             
                             pc_client = PortalLoginClient()
-                            pc_status, html = await asyncio.to_thread(pc_client.login, pc.university_id, password)
+                            pc_status, portal_html = await asyncio.to_thread(pc_client.login, pc.university_id, password)
                             
                             if pc_status == "SUCCESS":
                                 canary_user = pc
                                 portal_client = pc_client
                                 login_status = pc_status
-                                # html is already populated from login()
+                                # portal_html is already populated from login()
                                 break
                             elif pc_status == "BAD_CREDENTIALS":
                                 pc.is_credential_valid = False
@@ -134,7 +134,7 @@ async def run_check_all_grades():
                         if portal_client: portal_client.close()
                         continue
 
-                    if not html: 
+                    if not portal_html: 
                         if portal_client: portal_client.close()
                         continue
                     
@@ -148,7 +148,7 @@ async def run_check_all_grades():
                         db.add(status)
                     status.last_checked_at = datetime.utcnow()
 
-                    result_data = parser.parse_grade_report(html)
+                    result_data = parser.parse_grade_report(portal_html)
                     courses = result_data["courses"]
                     
                     if courses:
@@ -363,13 +363,13 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                 try:
                     portal_client = PortalLoginClient()
                     logger.info(f"⏳ Attempting portal login for {user.university_id}... (Attempt {attempt + 1}/{max_retries})")
-                    login_status, html = await asyncio.to_thread(portal_client.login, user.university_id, password)
+                    login_status, portal_html = await asyncio.to_thread(portal_client.login, user.university_id, password)
                     
                     if login_status == "SUCCESS":
                         logger.info("🔑 Login successful. Parsing grades...")
                         user.is_credential_valid = True # Mark as verified
-                        if html:
-                            res_data = parser.parse_grade_report(html)
+                        if portal_html:
+                            res_data = parser.parse_grade_report(portal_html)
                             courses = res_data["courses"]
                             
                             # Update user's academic year/semester from latest scrape if available
