@@ -77,10 +77,58 @@ class UserService:
         user = await self.get_user_by_telegram_id(telegram_id)
         if user:
             user.university_id = new_uni_id
+            user.is_credential_valid = False # Require re-verification
             await self.db.flush()
             
             from services.audit_service import AuditService
             await AuditService(self.db).log("UNIVERSITY_ID_UPDATED", telegram_id, {"new_id": new_uni_id})
+        return user
+
+    async def update_password(self, telegram_id: int, new_password: str):
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if user:
+            encrypted_pw, iv = self.encryption_service.encrypt_password(new_password)
+            
+            stmt = select(UserCredential).where(UserCredential.user_id == user.id)
+            cred_result = await self.db.execute(stmt)
+            credential = cred_result.scalar_one_or_none()
+            
+            if not credential:
+                credential = UserCredential(
+                    user_id=user.id,
+                    encrypted_password=encrypted_pw,
+                    iv=iv
+                )
+                self.db.add(credential)
+            else:
+                credential.encrypted_password = encrypted_pw
+                credential.iv = iv
+                user.is_credential_valid = True # Reset on update
+            
+            await self.db.flush()
+            from services.audit_service import AuditService
+            await AuditService(self.db).log("PASSWORD_UPDATED", telegram_id)
+        return user
+
+    async def update_department(self, telegram_id: int, new_dept: str):
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if user:
+            user.department_id = new_dept
+            await self.db.flush()
+            
+            from services.audit_service import AuditService
+            await AuditService(self.db).log("DEPARTMENT_UPDATED", telegram_id, {"new_dept": new_dept})
+        return user
+
+    async def update_campus(self, telegram_id: int, new_campus: str):
+        user = await self.get_user_by_telegram_id(telegram_id)
+        if user:
+            user.campus_id = new_campus
+            user.is_credential_valid = False # Require re-verification
+            await self.db.flush()
+            
+            from services.audit_service import AuditService
+            await AuditService(self.db).log("CAMPUS_UPDATED", telegram_id, {"new_campus": new_campus})
         return user
 
     async def get_decrypted_password(self, user: User) -> Optional[str]:

@@ -20,6 +20,7 @@ class RegistrationState(StatesGroup):
     waiting_for_uni_id = State() # For updates
     waiting_for_password_update = State() # For password-only updates
     waiting_for_dept_update = State() # For department updates
+    waiting_for_campus_update = State() # For campus updates
 
 class UpdateState(StatesGroup):
     waiting_for_year = State()
@@ -140,7 +141,7 @@ async def cmd_my_data(message: Message, user_id: int = None):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🆔 Change University ID", callback_data="change_uni_id")],
             [InlineKeyboardButton(text="🔄 Change Password", callback_data="change_password")],
-            [InlineKeyboardButton(text="🏫 Change Department", callback_data="change_department")],
+            [InlineKeyboardButton(text="🏫 Change Department", callback_data="change_department"), InlineKeyboardButton(text="📍 Change Campus", callback_data="change_campus")],
             [InlineKeyboardButton(text="📅 Change Year", callback_data="change_year"), InlineKeyboardButton(text="⏳ Change Semester", callback_data="change_sem")]
         ])
         
@@ -173,10 +174,7 @@ async def process_uni_id_update(message: Message, state: FSMContext):
         await user_service.update_university_id(message.from_user.id, new_id)
         await db.commit()
     
-    await message.answer(f"✅ University ID updated to: <tg-spoiler>{html.escape(new_id)}</tg-spoiler>\n\nI'm triggering an update sync to verify your new ID...", parse_mode="HTML")
-    
-    from workers.tasks import run_check_user_grades
-    asyncio.create_task(run_check_user_grades(message.from_user.id, "All"))
+    await message.answer(f"✅ University ID updated to: <tg-spoiler>{html.escape(new_id)}</tg-spoiler>\n\n⚠️ <b>Important:</b> If your password also changed, please update it now to enable grade checking.")
     
     await state.clear()
     await cmd_my_data(message)
@@ -221,12 +219,36 @@ async def process_dept_update(message: Message, state: FSMContext):
     new_dept = message.text.strip().upper()
     async with SessionLocal() as db:
         user_service = UserService(db)
-        user = await user_service.get_user_by_telegram_id(message.from_user.id)
-        if user:
-            user.department_id = new_dept
-            await db.commit()
+        await user_service.update_department(message.from_user.id, new_dept)
+        await db.commit()
     
-    await message.answer(f"✅ Department updated to: <code>{html.escape(new_dept)}</code>", parse_mode="HTML")
+    await message.answer(f"✅ Department updated to: <code>{html.escape(new_dept)}</code>\n\nI'm triggering an update sync to verify your changes...", parse_mode="HTML")
+    
+    from workers.tasks import run_check_user_grades
+    asyncio.create_task(run_check_user_grades(message.from_user.id, "All"))
+    
+    await state.clear()
+    await cmd_my_data(message)
+
+@router.callback_query(F.data == "change_campus")
+async def cb_change_campus(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer(
+        "Please enter your <b>Campus Code</b> (e.g., MAIN, 5-KILO, 6-KILO):",
+        parse_mode="HTML"
+    )
+    await state.set_state(RegistrationState.waiting_for_campus_update)
+    await callback.answer()
+
+@router.message(RegistrationState.waiting_for_campus_update, ~F.text.startswith("/"))
+async def process_campus_update(message: Message, state: FSMContext):
+    new_campus = message.text.strip().upper()
+    async with SessionLocal() as db:
+        user_service = UserService(db)
+        await user_service.update_campus(message.from_user.id, new_campus)
+        await db.commit()
+    
+    await message.answer(f"✅ Campus updated to: <code>{html.escape(new_campus)}</code>\n\n⚠️ <b>Important:</b> If your credentials need re-verification for this campus, please update your password or use /refresh.")
+    
     await state.clear()
     await cmd_my_data(message)
 

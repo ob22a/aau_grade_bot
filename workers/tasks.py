@@ -367,6 +367,7 @@ async def run_check_user_grades(telegram_id: int, requested_year: str = "All"):
                     
                     if login_status == "SUCCESS":
                         logger.info("🔑 Login successful. Parsing grades...")
+                        user.is_credential_valid = True # Mark as verified
                         if html:
                             res_data = parser.parse_grade_report(html)
                             courses = res_data["courses"]
