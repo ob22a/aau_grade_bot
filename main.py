@@ -1,3 +1,4 @@
+import sys
 import asyncio
 import logging
 from aiohttp import web
@@ -12,7 +13,7 @@ async def handle_health_check(request):
 async def main():
   if not BOT_TOKEN:
     logger.error("BOT_TOKEN is not set. Please set it in the .env file.")
-    return
+    sys.exit(1)
   
   app = web.Application()
   app.router.add_get("/",handle_health_check)
