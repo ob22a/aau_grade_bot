@@ -4,7 +4,7 @@ import logging
 from aiohttp import web
 from config import BOT_TOKEN,PORT
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO) # Necessary for root logger for all app and aiohttp logs to be printed
 logger = logging.getLogger(__name__)
 
 async def handle_health_check(request):
@@ -12,7 +12,7 @@ async def handle_health_check(request):
 
 async def main():
   if not BOT_TOKEN:
-    logger.error("BOT_TOKEN is not set. Please set it in the .env file.")
+    logger.critical("BOT_TOKEN is not set. Please set it in the .env file. Exiting program")
     sys.exit(1)
   
   app = web.Application()
