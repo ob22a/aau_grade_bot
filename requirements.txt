@@ -3,3 +3,4 @@ sqlalchemy
 asyncpg
 aiohttp
 python-dotenv
+pytest
