@@ -4,3 +4,4 @@ asyncpg
 aiohttp
 python-dotenv
 pytest
+alembic
