@@ -34,6 +34,10 @@ class GradeChangeStatus(Enum):
     NEW_COURSE_GRADE_RELEASED=auto()
     GRADE_RELEASED=auto()
     CHANGE_DETECTED = auto()
+
+class SectionSource(Enum):
+    SCRAPED = auto()
+    USER_REPORTED = auto()
     
 class Base(DeclarativeBase):
     pass
@@ -67,6 +71,15 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(
         SQLEnum(UserRole),
         default=UserRole.USER
+    )
+
+    section: Mapped[str | None] = mapped_column(
+        String(20),
+        index=True
+    )
+
+    section_source: Mapped[SectionSource | None] = mapped_column(
+        SQLEnum(SectionSource)
     )
 
     is_credential_valid: Mapped[bool] = mapped_column(default=True)
@@ -434,6 +447,11 @@ class CohortState(Base):
         primary_key=True
     )
 
+    section: Mapped[str] = mapped_column(
+        String(20),
+        primary_key=True
+    )
+
     representative_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True
@@ -512,7 +530,12 @@ class CohortScan(Base):
     semester: Mapped[Semester] = mapped_column(
         SQLEnum(Semester)
     )
-    
+
+    section: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False
+    )
+ 
     representative_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True
@@ -554,12 +577,14 @@ class CohortScan(Base):
             "department_id", 
             "academic_year", 
             "semester", 
-            name="uq_scan_per_run_cohort"
+            "section",
+            name="uq_scan_per_run_cohort_section"
         ),
         Index(
             "ix_cohort_scans_cohort", 
             "department_id", 
             "academic_year", 
-            "semester"
+            "semester",
+            "section"
         ),
     )
