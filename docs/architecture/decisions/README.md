@@ -18,3 +18,8 @@ Use [TEMPLATE.md](./TEMPLATE.md) for new entries.
 | 006 | [Health check returns 204, not 200](./006-health-check-204.md) | Accepted |
 | 007 | [Conversation state is tracked with a formal FSM, persisted in Redis](./007-fsm-conversation-state.md) | Accepted |
 | 008 | [Handlers, services, and repositories are separated, with manual dependency injection](./008-service-repository-di-layering.md) | Accepted |
+| 009 | [Grade-change baseline is judged against the cohort's own term, not the clock](./009-baseline-grade-classification.md) | Accepted |
+| 010 | [A system_settings pointer tracks the current term, for scheduling only](./010-current-term-pointer.md) | Accepted |
+| 011 | [Section is added to the cohort sampling key](./011-section-in-cohort-key.md) | Accepted |
+| 012 | [User.section is a flat column, re-scraped on every cycle](./012-user-section-storage.md) | Accepted |
+| 013 | [Section self-report fallback, with a trust boundary](./013-section-self-report-fallback.md) | Accepted |
