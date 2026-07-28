@@ -26,3 +26,8 @@ Use [TEMPLATE.md](./TEMPLATE.md) for new entries.
 | 014 | [Repositories return domain data, never ORM instances](./014-domain-boundaries-and-repository-results.md) | Accepted |
 | 015 | [One AsyncSession per Unit of Work and concurrent task](./015-unit-of-work-and-async-session-ownership.md) | Accepted |
 | 016 | [Background work is dispatched through supervised domain events](./016-supervised-domain-events.md) | Accepted |
+| 017 | [Resilient parser results](./017-resilient-parser-results.md) | Accepted |
+| 018 | [External systems are accessed through explicit ports](./018-ports-for-external-systems.md) | Accepted |
+| 019 | [Cron is authenticated, atomic, and portal-concurrency limited](./019-atomic-cron-and-portal-limits.md) | Accepted |
+| 020 | [Grade reads use cache-aside storage](./020-cache-aside-grade-reads.md) | Accepted |
+| 021 | [Failed AAU credentials are never automatically retried](./021-conservative-credential-failure-policy.md) | Accepted |
