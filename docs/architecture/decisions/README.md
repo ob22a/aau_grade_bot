@@ -23,3 +23,6 @@ Use [TEMPLATE.md](./TEMPLATE.md) for new entries.
 | 011 | [Section is added to the cohort sampling key](./011-section-in-cohort-key.md) | Accepted |
 | 012 | [User.section is a flat column, re-scraped on every cycle](./012-user-section-storage.md) | Accepted |
 | 013 | [Section self-report fallback, with a trust boundary](./013-section-self-report-fallback.md) | Accepted |
+| 014 | [Repositories return domain data, never ORM instances](./014-domain-boundaries-and-repository-results.md) | Accepted |
+| 015 | [One AsyncSession per Unit of Work and concurrent task](./015-unit-of-work-and-async-session-ownership.md) | Accepted |
+| 016 | [Background work is dispatched through supervised domain events](./016-supervised-domain-events.md) | Accepted |
