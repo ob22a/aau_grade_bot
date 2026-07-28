@@ -2,7 +2,7 @@ import sys
 import asyncio
 import logging
 from aiohttp import web
-from config import BOT_TOKEN,PORT
+from src.config import BOT_TOKEN,PORT
 
 logging.basicConfig(level=logging.INFO) # Necessary for root logger for all app and aiohttp logs to be printed
 logger = logging.getLogger(__name__)

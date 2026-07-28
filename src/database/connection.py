@@ -1,6 +1,6 @@
 import sys
 import logging
-from config import DATABASE_URL
+from src.config import DATABASE_URL
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
