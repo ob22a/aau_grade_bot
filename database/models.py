@@ -62,10 +62,11 @@ class User(Base):
         index=True
     )
 
-    department_id: Mapped[str] = mapped_column(
+    department_id: Mapped[str | None] = mapped_column(
         String(50),
         ForeignKey("departments.department_id"),
-        index=True
+        index=True,
+        nullable=True
     )
 
     role: Mapped[UserRole] = mapped_column(
