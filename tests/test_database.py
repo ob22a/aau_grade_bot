@@ -1,5 +1,5 @@
 import pytest
-from database.connection import clean_async_database_url
+from src.database.connection import clean_async_database_url
 
 @pytest.mark.parametrize(
     "input_url, expected_url",
