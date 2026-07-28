@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
-from clients.aau_portal import PortalSchemaChangedError, PortalDataValidationError, SchemaChangeDiagnostic
+from src.clients.aau_portal import PortalSchemaChangedError, PortalDataValidationError, SchemaChangeDiagnostic
 from .models import ParserWarning, ParserWarningCode, ProfilePageResult, StudentProfileData
 
 if TYPE_CHECKING:

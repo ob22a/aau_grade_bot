@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     admins_telegram_id: list[int] | None = None
     metrics_secret: str | None = None
     environment: str = "production"
+    portal_semaphore_limit: int = 3
+    portal_timeout_seconds: int = 30
+    registration_cooldown_seconds: int = 300
+    manual_scrape_cooldown_minutes: int = 30
+    inactivity_notice_months: int = 9
 
     @field_validator("port")
     @classmethod
