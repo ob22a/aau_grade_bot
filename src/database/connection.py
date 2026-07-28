@@ -1,53 +1,66 @@
-import sys
-import logging
-from src.config import DATABASE_URL
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from __future__ import annotations
+from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-"""
-Cleans up database url into async engine friendly format
-"""
-def clean_async_database_url(url: str) -> str:
+INCOMPATIBLE_ASYNCPG_PARAMETERS = frozenset({"sslmode", "channel_binding"})
+
+
+def _is_pooler_url(url: str) -> bool:
+    """Detect Neon pooler endpoints (contain '-pooler' in hostname)."""
+    return "-pooler" in url
+
+
+def clean_async_database_url(url: Optional[str]) -> Optional[str]:
+    """Convert a PostgreSQL URL to asyncpg format and remove unsupported options."""
     if not url:
         return url
-        
-    # Standardize the scheme for asyncpg
+
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-    elif url.startswith("postgresql://") and "+asyncpg" not in url:
+    elif url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        
-    # Clean up asyncpg-incompatible query parameters
+
     parsed = urlparse(url)
-    if parsed.query:
-        params = parse_qs(parsed.query)
-        params.pop("sslmode", None)
-        params.pop("channel_binding", None)
-        new_query = urlencode(params, doseq=True)
-        parsed = parsed._replace(query=new_query)
-        
-    return urlunparse(parsed)
+    parameters = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key not in INCOMPATIBLE_ASYNCPG_PARAMETERS
+    ]
+    return urlunparse(parsed._replace(query=urlencode(parameters, doseq=True)))
 
 
-logger = logging.getLogger(__name__)
+def create_engine_from_url(database_url: str) -> AsyncEngine:
+    """Build a resilient async engine compatible with Neon/PgBouncer pooler endpoints.
+    """
+    cleaned_url = clean_async_database_url(database_url)
+    if not cleaned_url:
+        raise ValueError("DATABASE_URL is required to create a database engine")
 
-if not DATABASE_URL:
-  logger.critical("Missing Database URL in the environment variable. Exiting code")
-  sys.exit(1)
+    using_pooler = _is_pooler_url(cleaned_url)
 
-# No need for try catch block because the engine is lazy and connection won't be made rightaway 
+    if using_pooler:
+        return create_async_engine(
+            cleaned_url,
+            poolclass=NullPool,
+            connect_args={
+                "ssl": True,
+                "statement_cache_size": 0,
+                "prepared_statement_cache_size": 0,
+            },
+        )
+    
+    return create_async_engine(
+        cleaned_url,
+        connect_args={"ssl": True},
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=10,
+    )
 
-engine=create_async_engine(
-  clean_async_database_url(DATABASE_URL),
-  connect_args={
-    "ssl":True
-  },
-  pool_recycle=300,
-  pool_pre_ping=True
-)
 
-SessionLocal = async_sessionmaker(
-  bind=engine,
-  class_=AsyncSession,
-  expire_on_commit=False
-)
+def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Create the session factory injected into Units of Work."""
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

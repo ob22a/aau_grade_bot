@@ -4,8 +4,10 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 import os
 
-from src.config import DATABASE_URL
+from src.config import load_settings
 from src.database.models import Base
+
+DATABASE_URL = load_settings().database_url
 
 from alembic import context
 
