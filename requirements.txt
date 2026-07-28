@@ -7,3 +7,4 @@ pytest
 alembic
 pydantic
 beautifulsoup4
+cryptography
