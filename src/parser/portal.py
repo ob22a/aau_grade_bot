@@ -135,7 +135,7 @@ def parse_grade_report(html: str) -> GradeReport:
             )
         )
 
-    rows = table.select("tbody > tr")
+    rows = table.find_all("tr")
     if len(rows) < 3:
         raise PortalDataValidationError("Grade report contains too few rows")
 
