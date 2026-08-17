@@ -56,6 +56,23 @@ def build_grades_router(services: ApplicationServices) -> Router:
             logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
             await message.answer("❌ An error occurred while retrieving your grades. Please try again later.")
 
+    @router.callback_query(F.data == "view_grades")
+    async def view_grades_callback(query: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
+        user_id = query.from_user.id if query.from_user else 0
+        request = GradeReadRequest(telegram_id=user_id, page_index=0)
+        try:
+            result = await services.grades.read(request)
+            keyboard = build_grades_keyboard(result.current_page, result.total_pages)
+            if query.message:
+                await query.message.answer(result.message, parse_mode="Markdown", reply_markup=keyboard)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
+            if query.message:
+                await query.message.answer("❌ An error occurred while retrieving your grades. Please try again later.")
+        await query.answer()
+
     @router.callback_query(F.data.startswith("grade_page:"))
     async def page_callback(query: CallbackQuery) -> None:
         if not query.data or not query.message:

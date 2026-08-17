@@ -149,5 +149,13 @@ class RegistrationService:
 
         return RegistrationOutcome(
             profile=profile,
-            result=RegistrationResult(success=True, message="Registration complete"),
+            result=RegistrationResult(
+                success=True, 
+                message=f"✅ <b>Registration complete!</b>\n\n"
+                        f"University ID: <tg-spoiler>{university_id}</tg-spoiler>\n"
+                        f"Department: <code>{profile.profile.department}</code>\n\n"
+                        "⚡ <b>Initial Sync Started</b>\n"
+                        "I'm now fetching your historical grades from the portal for the first time. This usually takes 1-2 minutes.\n\n"
+                        "I'll notify you as soon as I have the results! ⏳"
+            ),
         )

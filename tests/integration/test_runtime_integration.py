@@ -184,8 +184,8 @@ def test_registration_flow_reaches_service_and_returns_messages() -> None:
             await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("password123")))
 
         assert replies[0].startswith("Send your AAU university ID")
-        assert replies[1].startswith("Now send your AAU")
-        assert replies[2] == "Registration complete"
+        assert "Portal Password" in replies[1]
+        assert "Registration complete" in replies[2]
         assert services.registration.last_request is not None
         assert services.registration.last_request.university_id == "UGR/0000/16"
         assert services.registration.last_request.password == "password123"
@@ -213,9 +213,9 @@ def test_registration_command_interception_cancels_state() -> None:
 
             # 2. Intercept with /start instead of sending ID
             await dispatcher.feed_update(bot, Update(update_id=2, message=_make_message("/start")))
-            assert "Welcome to AAU Grade Bot" in replies[1]
+            assert "Welcome! I am your <b>AAU Grade Bot</b>" in replies[1]
 
-            # 3. Now send a Student ID string — it should NOT be accepted as registration input because state was cleared
+            # 3. Now send a Student ID string  it should NOT be accepted as registration input because state was cleared
             await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("UGR/0000/16")))
             assert "Unknown command" in replies[2]
 
@@ -243,7 +243,7 @@ def test_registration_invalid_student_id_format_retries() -> None:
 
             # Valid ID on retry
             await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("UGR/0000/16")))
-            assert "Now send your AAU" in replies[2]
+            assert "Portal Password" in replies[2]
 
     asyncio.run(scenario())
 

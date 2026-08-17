@@ -6,7 +6,7 @@ import logging
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from clients.aau_portal import (
     PortalAuthenticationError,
@@ -37,6 +37,19 @@ def build_registration_router(services: ApplicationServices) -> Router:
         else:
             await message.answer("No active operation to cancel. Send /register or /grades to start.")
 
+    @router.callback_query(F.data == "register_start")
+    async def begin_registration_callback(query: CallbackQuery, state: FSMContext) -> None:
+        """Start registration flow from callback."""
+        await state.clear()
+        await state.set_state(RegistrationFSM.university_id)
+        if query.message:
+            await query.message.answer(
+                "Send your AAU university ID in the format UGR/NNNN/YY (e.g., UGR/1234/16).\n\n"
+                "<i>(Send /cancel at any time to abort)</i>",
+                parse_mode="HTML",
+            )
+        await query.answer()
+
     @router.message(Command("register"))
     async def begin_registration(message: Message, state: FSMContext) -> None:
         """Start registration flow, clearing any existing state."""
@@ -44,8 +57,8 @@ def build_registration_router(services: ApplicationServices) -> Router:
         await state.set_state(RegistrationFSM.university_id)
         await message.answer(
             "Send your AAU university ID in the format UGR/NNNN/YY (e.g., UGR/1234/16).\n\n"
-            "*(Send /cancel at any time to abort)*",
-            parse_mode="Markdown",
+            "<i>(Send /cancel at any time to abort)</i>",
+            parse_mode="HTML",
         )
 
     @router.message(RegistrationFSM.university_id)
@@ -68,25 +81,30 @@ def build_registration_router(services: ApplicationServices) -> Router:
             normalized_id = normalize_aau_undergraduate_id(text)
         except ValueError:
             await message.answer(
-                "❌ *Invalid AAU Student ID format.*\n"
-                "Expected format: `UGR/NNNN/YY` (e.g., `UGR/1234/16`).\n\n"
+                "❌ <b>Invalid AAU Student ID format.</b>\n"
+                "Expected format: <code>UGR/NNNN/YY</code> (e.g., <code>UGR/1234/16</code>).\n\n"
                 "Please send a valid ID, or send /cancel to abort.",
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
             return
 
         await state.update_data(university_id=normalized_id)
         await state.set_state(RegistrationFSM.password)
         await message.answer(
-            "Now send your AAU portal password.\n\n"
-            "*(Send /cancel at any time to abort)*",
-            parse_mode="Markdown",
+            "Great! Now enter your <b>Portal Password</b> (this will be encrypted safely):\n\n"
+            "<i>(Send /cancel at any time to abort)</i>",
+            parse_mode="HTML",
         )
 
     @router.message(RegistrationFSM.password)
     async def capture_password(message: Message, state: FSMContext) -> None:
         """Capture password, execute registration service, and handle errors."""
         text = message.text or ""
+        
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.warning(f"Could not delete password message: {e}")
 
         # Intercept commands sent while waiting for input
         if text.startswith("/"):
@@ -109,13 +127,13 @@ def build_registration_router(services: ApplicationServices) -> Router:
         try:
             outcome = await services.registration.register(request)
             await state.clear()
-            await message.answer(outcome.result.message)
+            await message.answer(outcome.result.message, parse_mode="HTML")
         except PortalAuthenticationError:
             await state.clear()
             await message.answer(
-                "❌ *Registration failed:* Invalid AAU username or password.\n"
+                "❌ <b>Registration failed:</b> Invalid AAU username or password.\n"
                 "Please verify your portal credentials and use /register to try again.",
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
         except PortalLockoutRiskError as exc:
             await state.clear()
