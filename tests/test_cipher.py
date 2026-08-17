@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import pytest
 
-from src.crypto.cipher import AesGcmCipher, Ciphertext
+from crypto.cipher import AesGcmCipher, Ciphertext
 
 
 def test_generate_key_produces_32_byte_key() -> None:

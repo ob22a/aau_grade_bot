@@ -5,8 +5,8 @@ from typing import Iterable
 
 from bs4 import BeautifulSoup
 
-from src.parser.errors import PortalDataValidationError, PortalSchemaChangedError, SchemaChangeDiagnostic
-from src.parser.models import AssessmentReference, CourseGrade, GradeReport, GradeReportSummary
+from parser.errors import PortalDataValidationError, PortalSchemaChangedError, SchemaChangeDiagnostic
+from parser.models import AssessmentReference, CourseGrade, GradeReport, GradeReportSummary
 
 
 _TERM_PATTERN = re.compile(

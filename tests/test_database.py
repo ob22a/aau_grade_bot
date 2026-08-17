@@ -60,3 +60,10 @@ from src.database.connection import clean_async_database_url
 def test_clean_async_database_url(input_url, expected_url):
     """Verifies that database URLs are correctly formatted for the asyncpg driver."""
     assert clean_async_database_url(input_url) == expected_url
+
+
+def test_clean_async_database_url_preserves_duplicate_safe_parameters():
+    url = "postgres://user:pass@localhost/db?application_name=a&application_name=b&sslmode=require"
+    assert clean_async_database_url(url) == (
+        "postgresql+asyncpg://user:pass@localhost/db?application_name=a&application_name=b"
+    )

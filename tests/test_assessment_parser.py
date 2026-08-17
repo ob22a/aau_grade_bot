@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from src.parser.assessment import parse_assessment_details
-from src.parser.models import AssessmentDetailsResult, AssessmentDetails
-from src.clients.aau_portal import PortalSchemaChangedError, PortalDataValidationError
+from parser.assessment import parse_assessment_details
+from parser.models import AssessmentDetailsResult, AssessmentDetails
+from clients.aau_portal import PortalSchemaChangedError, PortalDataValidationError
 
 
 def test_parse_valid_assessment_modal():

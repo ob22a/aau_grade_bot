@@ -7,7 +7,7 @@ import re
 import aiohttp
 from bs4 import BeautifulSoup
 
-from src.clients.aau_portal import (
+from clients.aau_portal import (
     PortalClient,
     PortalError,
     PortalSchemaChangedError,
@@ -18,10 +18,10 @@ from src.clients.aau_portal import (
     PortalLockoutRiskError,
     SchemaChangeDiagnostic,
 )
-from src.config import Settings
-from src.parser.home import parse_profile_page
-from src.parser.portal import parse_grade_report
-from src.parser.models import GradeReport, ProfilePageResult
+from config import Settings
+from parser.home import parse_profile_page
+from parser.portal import parse_grade_report
+from parser.models import GradeReport, ProfilePageResult
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +268,8 @@ class AAUPortalClient(PortalClient):
                 f"Portal connection error during login: {exc}"
             ) from exc
 
-    def _classify_login_response(self, html: str) -> dict:
+    @staticmethod
+    def _classify_login_response(html: str) -> dict:
         """
         Parse login response and classify authentication outcome.
 
@@ -334,7 +335,8 @@ class AAUPortalClient(PortalClient):
             "html": html,
         }
 
-    def _handle_auth_failure(self, auth_result: dict) -> None:
+    @staticmethod
+    def _handle_auth_failure(auth_result: dict) -> None:
         """
         Raise appropriate exception based on authentication failure type.
 

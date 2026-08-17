@@ -7,4 +7,6 @@ pytest
 alembic
 pydantic
 beautifulsoup4
+pydantic-settings
 cryptography
+redis

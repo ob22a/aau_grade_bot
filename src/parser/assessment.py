@@ -6,7 +6,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from src.clients.aau_portal import PortalSchemaChangedError, PortalDataValidationError, SchemaChangeDiagnostic
+from clients.aau_portal import PortalSchemaChangedError, PortalDataValidationError, SchemaChangeDiagnostic
 from .models import AssessmentDetailsResult, AssessmentDetails, AssessmentScore
 
 

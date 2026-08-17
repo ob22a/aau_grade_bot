@@ -2,7 +2,7 @@ import sys
 import asyncio
 import logging
 from aiohttp import web
-from src.config import BOT_TOKEN,PORT
+from src.config import load_settings
 
 logging.basicConfig(level=logging.INFO) # Necessary for root logger for all app and aiohttp logs to be printed
 logger = logging.getLogger(__name__)
@@ -11,7 +11,8 @@ async def handle_health_check(request):
   return web.Response(status=204) # No content this is better to avoid unnecessary data transfer
 
 async def main():
-  if not BOT_TOKEN:
+  settings = load_settings()
+  if not settings.bot_token:
     logger.critical("BOT_TOKEN is not set. Please set it in the .env file. Exiting program")
     sys.exit(1)
   
@@ -21,7 +22,7 @@ async def main():
 
   runner = web.AppRunner(app)
   await runner.setup()
-  site = web.TCPSite(runner, '0.0.0.0',PORT)
+  site = web.TCPSite(runner, '0.0.0.0', settings.port)
   await site.start()
 
   await asyncio.Event().wait()

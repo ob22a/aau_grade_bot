@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.parser.models import GradeReport, ParsedPortalResult, ProfilePageResult
+from parser.models import GradeReport, ParsedPortalResult, ProfilePageResult
 
 
 @dataclass(frozen=True)

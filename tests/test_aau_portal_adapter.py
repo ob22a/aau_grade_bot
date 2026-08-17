@@ -5,13 +5,19 @@ from __future__ import annotations
 import pytest
 from pathlib import Path
 
-from src.clients.aau_portal_adapter import AAUPortalClient
-from src.clients.aau_portal import (
+from clients.aau_portal_adapter import AAUPortalClient
+from clients.aau_portal import (
     PortalAuthenticationError,
     PortalLockoutRiskError,
+    PortalSchemaChangedError,
     PortalDataValidationError,
 )
-from src.config import Settings
+from config import Settings
+
+
+# ============================================================================
+# FIXTURES
+# ============================================================================
 
 
 @pytest.fixture
@@ -32,6 +38,11 @@ def adapter(settings):
 def _read_fixture(filename: str) -> str:
     """Load HTML fixture from tests/fixtures/portal/."""
     return (Path("tests/fixtures/portal") / filename).read_text(encoding="utf-8")
+
+
+# ============================================================================
+# STUDENT ID VALIDATION
+# ============================================================================
 
 
 class TestStudentIdValidation:
@@ -113,6 +124,12 @@ class TestTokenExtraction:
         assert password_input is not None
         assert token_input is not None
 
+
+# ============================================================================
+# LOGIN RESPONSE CLASSIFICATION
+# ============================================================================
+
+
 class TestLoginClassification:
     """Login response classification tests."""
 
@@ -171,6 +188,12 @@ class TestLoginClassification:
         # With many attempts, should fall through to generic INVALID_CREDENTIALS
         assert result["status"] == "INVALID_CREDENTIALS"
 
+
+# ============================================================================
+# AUTH FAILURE HANDLING
+# ============================================================================
+
+
 class TestAuthFailureHandling:
     """Authentication failure exception raising tests."""
 
@@ -191,6 +214,12 @@ class TestAuthFailureHandling:
 
         with pytest.raises(PortalLockoutRiskError, match="2 attempt"):
             adapter._handle_auth_failure(auth_result)
+
+
+# ============================================================================
+# ADAPTER INITIALIZATION
+# ============================================================================
+
 
 class TestAdapterInitialization:
     """Adapter configuration and initialization tests."""
@@ -216,6 +245,12 @@ class TestAdapterInitialization:
         assert AAUPortalClient.HOME_ENDPOINT == "/Home"
         assert AAUPortalClient.GRADES_ENDPOINT == "/Grade/GradeReport"
         assert AAUPortalClient.ASSESSMENT_ENDPOINT == "/Grade/GradeReport/AssessmentDetail"
+
+
+# ============================================================================
+# STUDENT ID PATTERN REGEX
+# ============================================================================
+
 
 class TestStudentIdPattern:
     """Student ID regex pattern tests."""
