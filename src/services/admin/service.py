@@ -22,21 +22,38 @@ class SettingsUpdateResult:
 class AdminService:
     """Handle admin-only broadcast and settings workflows."""
 
-    def __init__(self, notifier: Any | None = None, settings_repository: Any | None = None, metrics: Any | None = None) -> None:
+    def __init__(self, notifier: Any | None = None, settings_repository: Any | None = None, metrics: Any | None = None, session_factory: Any | None = None) -> None:
         self.notifier = notifier
         self.settings_repository = settings_repository
         self.metrics = metrics
+        self.session_factory = session_factory
 
     async def broadcast(self, request: BroadcastRequest) -> BroadcastResult:
         recipients = 0
-        if self.notifier is not None and request.recipient_ids:
-            for telegram_id in request.recipient_ids:
-                await self.notifier.send_message(telegram_id, request.message)
-                recipients += 1
+        target_ids = request.recipient_ids or []
+        
+        # If no explicit recipients provided, fetch all users from the DB
+        if not target_ids and self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from sqlalchemy import select
+            from database.models import User
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                result = await uow.session.scalars(select(User.telegram_id))
+                target_ids = list(result.all())
+        
+        if self.notifier is not None and target_ids:
+            for telegram_id in target_ids:
+                try:
+                    await self.notifier.send_message(telegram_id, request.message)
+                    recipients += 1
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to send broadcast to {telegram_id}: {e}")
         elif self.notifier is not None:
             await self.notifier.send_admin(request.message)
             recipients = 1
-        return BroadcastResult(message="Broadcast sent", recipients=recipients)
+            
+        return BroadcastResult(message=f"Broadcast sent to {recipients} users", recipients=recipients)
 
     async def update_setting(self, request: SettingsUpdateRequest) -> SettingsUpdateResult:
         if not request.confirm:

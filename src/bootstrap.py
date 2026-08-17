@@ -13,15 +13,16 @@ from aiogram.fsm.storage.redis import RedisStorage
 
 from clients.aau_portal_adapter import AAUPortalClient
 from clients.telegram_adapter import AiogramTelegramNotificationSender
+from clients.cache_adapter import InMemoryCache
 from config import Settings
 from crypto.cipher import AesGcmCipher
-from handlers import (
-    build_admin_router,
-    build_fallback_router,
-    build_grades_router,
-    build_registration_router,
-    build_start_router,
-)
+from handlers.commands.admin import build_admin_router
+from handlers.commands.fallback import build_fallback_router
+from handlers.commands.grades import build_grades_router
+from handlers.commands.registration import build_registration_router
+from handlers.commands.start import build_start_router
+from handlers.commands.unregister import build_unregister_router
+from handlers.commands.my_data import build_my_data_router
 from services.container import ApplicationServices
 from services.account_lifecycle.service import AccountLifecycleService
 from services.admin.service import AdminService
@@ -69,7 +70,10 @@ def build_application_services(
 
     portal_client = AAUPortalClient(settings)
     cipher = AesGcmCipher.from_base64_key(settings.encryption_key)
-    sender = AiogramTelegramNotificationSender(bot, settings.admin_telegram_id) if bot is not None else None
+    sender = AiogramTelegramNotificationSender(bot, settings.admins_telegram_id) if bot is not None else None
+    
+    # We use a single shared cache instance for the application
+    cache = InMemoryCache()
 
     notification_service = NotificationService(sender)
 
@@ -84,15 +88,18 @@ def build_application_services(
             portal_client=portal_client,
             cipher=cipher,
             session_factory=session_factory,
+            cache=cache,
         ),
         grades=GradeReadService(
             portal_client=portal_client,
             cipher=cipher,
             session_factory=session_factory,
+            cache=cache,
+            notification_service=notification_service,
         ),
-        admin=AdminService(notifier=sender),
+        admin=AdminService(notifier=sender, session_factory=session_factory),
         scheduler=SchedulerService(notification_service=notification_service, portal_client=portal_client),
-        lifecycle=AccountLifecycleService(notifier=sender),
+        lifecycle=AccountLifecycleService(notifier=sender, session_factory=session_factory),
         notification=notification_service,
         scraper=ScraperService(portal_client),
     )
@@ -107,10 +114,12 @@ def build_dispatcher(settings: Settings, services: ApplicationServices) -> Dispa
     dispatcher.include_router(build_start_router(services))
     dispatcher.include_router(build_registration_router(services))
     dispatcher.include_router(build_grades_router(services))
-    dispatcher.include_router(build_admin_router(services))
+    dispatcher.include_router(build_my_data_router(services))
+    dispatcher.include_router(build_admin_router(settings, services))
+    dispatcher.include_router(build_unregister_router(services))
     dispatcher.include_router(build_fallback_router(services))
     return dispatcher
 
 
 def build_notification_sender(bot: Bot, settings: Settings) -> AiogramTelegramNotificationSender:
-    return AiogramTelegramNotificationSender(bot, settings.admin_telegram_id)
+    return AiogramTelegramNotificationSender(bot, settings.admins_telegram_id)

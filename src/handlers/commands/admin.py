@@ -12,8 +12,19 @@ from fsm.states import AdminBroadcastFSM
 from services.container import ApplicationServices
 
 
-def build_admin_router(services: ApplicationServices) -> Router:
+from aiogram.filters import Command, BaseFilter
+from config import Settings
+
+class AdminFilter(BaseFilter):
+    def __init__(self, admin_ids: list[int] | None):
+        self.admin_ids = admin_ids or []
+
+    async def __call__(self, message: Message) -> bool:
+        return message.from_user and message.from_user.id in self.admin_ids
+
+def build_admin_router(settings: Settings, services: ApplicationServices) -> Router:
     router = Router()
+    router.message.filter(AdminFilter(settings.admins_telegram_id))
 
     @router.message(Command("broadcast"))
     async def begin_broadcast(message: Message, state: FSMContext) -> None:
@@ -73,5 +84,52 @@ def build_admin_router(services: ApplicationServices) -> Router:
             await message.answer(result.message)
         except Exception as exc:
             await message.answer(f"❌ Failed to update setting: {exc}")
+
+    @router.message(Command("admin"))
+    async def cmd_admin(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        try:
+            # We can check the DB for the setting if needed, but for now we'll just show the menu.
+            await message.answer(
+                f"🛠 <b>Admin Dashboard</b>\n\n"
+                "Commands:\n"
+                "/start_service - Enable periodic checks\n"
+                "/stop_service - Disable periodic checks\n"
+                "/metrics - View bot metrics\n"
+                "/broadcast - Send a broadcast message",
+                parse_mode="HTML"
+            )
+        except Exception as exc:
+            await message.answer(f"❌ Failed to load admin dashboard: {exc}")
+
+    @router.message(Command("start_service"))
+    async def cmd_start_service(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        request = SettingsUpdateRequest(
+            admin_telegram_id=message.from_user.id if message.from_user else 0,
+            key="is_scheduling_enabled",
+            value="true",
+            confirm=True,
+        )
+        try:
+            result = await services.admin.update_setting(request)
+            await message.answer("✅ Grade checking service <b>ENABLED</b>.", parse_mode="HTML")
+        except Exception as exc:
+            await message.answer(f"❌ Failed to enable service: {exc}")
+
+    @router.message(Command("stop_service"))
+    async def cmd_stop_service(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        request = SettingsUpdateRequest(
+            admin_telegram_id=message.from_user.id if message.from_user else 0,
+            key="is_scheduling_enabled",
+            value="false",
+            confirm=True,
+        )
+        try:
+            result = await services.admin.update_setting(request)
+            await message.answer("🛑 Grade checking service <b>DISABLED</b>.", parse_mode="HTML")
+        except Exception as exc:
+            await message.answer(f"❌ Failed to disable service: {exc}")
 
     return router
