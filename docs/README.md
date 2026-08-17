@@ -22,6 +22,61 @@ The repository is organized as a layered application:
 - Sends admin alerts on portal schema changes and operational failures.
 - Uses Redis-backed FSM storage when available.
 
+## Architecture Diagrams
+
+### System Components Flow
+
+```mermaid
+flowchart TD
+    User((Telegram User)) --> |Commands / Callbacks| Telegram[Telegram API]
+    Telegram --> |Updates| Bot[aiogram Bot]
+    Bot --> Handlers[Handlers]
+    
+    Handlers --> FSM[FSM Storage<br/>Redis / Memory]
+    Handlers --> Services[Application Services]
+    
+    Services --> UnitOfWork[Unit of Work / Repositories]
+    UnitOfWork --> DB[(PostgreSQL Database)]
+    
+    Services --> Crypto[Crypto Module<br/>AES-256-GCM]
+    
+    Services --> PortalClient[Portal Adapter]
+    PortalClient --> Parser[HTML Parser DTOs]
+    PortalClient --> Portal[AAU Web Portal]
+```
+
+### Core Database Entities
+
+```mermaid
+erDiagram
+    USER ||--o{ USER_CREDENTIAL : "has"
+    USER ||--o{ USER_COURSE : "enrolled in"
+    USER ||--o{ SEMESTER_RESULT : "achieves"
+    USER ||--o{ AUDIT_LOG : "generates"
+    
+    USER {
+        int id PK
+        bigint telegram_id
+        string university_id
+        string department_id
+    }
+    
+    USER_CREDENTIAL {
+        int id PK
+        int user_id FK
+        bytes encrypted_password
+        string iv
+    }
+    
+    SEMESTER_RESULT {
+        int id PK
+        int user_id FK
+        string academic_year
+        float sgpa
+        float cgpa
+    }
+```
+
 ## Quick start
 
 1. Create and activate a virtual environment.
