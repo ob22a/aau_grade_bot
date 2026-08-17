@@ -5,6 +5,7 @@ from .commands.registration import build_registration_router
 from .commands.grades import build_grades_router
 from .commands.admin import build_admin_router
 from .commands.fallback import build_fallback_router
+from .commands.unregister import build_unregister_router
 
 __all__ = [
     "build_start_router",
@@ -12,4 +13,5 @@ __all__ = [
     "build_grades_router",
     "build_admin_router",
     "build_fallback_router",
+    "build_unregister_router",
 ]

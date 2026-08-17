@@ -21,26 +21,140 @@ class AccountLifecycleService:
     handler layer and future background jobs.
     """
 
-    def __init__(self, user_repository: Any | None = None, audit_repository: Any | None = None, notifier: Any | None = None) -> None:
+    def __init__(self, user_repository: Any | None = None, audit_repository: Any | None = None, notifier: Any | None = None, session_factory: Any | None = None) -> None:
         self.user_repository = user_repository
         self.audit_repository = audit_repository
         self.notifier = notifier
+        self.session_factory = session_factory
+
+    async def is_registered(self, telegram_id: int) -> bool:
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                user = await uow.users.get_by_telegram_id(telegram_id)
+                return user is not None
+        return False
 
     async def request_deletion(self, request: AccountDeletionRequest) -> AccountLifecycleResult:
         if not request.confirm:
             return AccountLifecycleResult(message="Confirmation required before deletion")
-        if self.user_repository is not None:
-            user = None
-            if hasattr(self.user_repository, "get_by_telegram_id"):
-                user = await self.user_repository.get_by_telegram_id(request.telegram_id)
-            if user is not None and hasattr(self.user_repository, "remove"):
-                await self.user_repository.remove(user)
-        if self.audit_repository is not None:
-            await self.audit_repository.add(
-                {
-                    "telegram_id": request.telegram_id,
-                    "action": "account_deletion_requested",
-                    "details": {"confirmed": True},
-                }
-            )
-        return AccountLifecycleResult(message="Account deletion queued", deleted=True)
+            
+        if self.session_factory is not None:
+            import random
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from database.models import AuditLog
+            
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                user = await uow.users.get_by_telegram_id(request.telegram_id)
+                if user is not None:
+                    from sqlalchemy import select
+                    from database.models import UserCredential, SemesterResult, UserCourse, Assessment
+                    
+                    # 1. Scramble related credentials and grades to prevent recovery
+                    cred = await uow.session.scalar(select(UserCredential).where(UserCredential.user_id == user.id))
+                    if cred:
+                        cred.encrypted_password = "deleted_password"
+                        cred.iv = "deleted_iv"
+                        
+                    results = await uow.session.scalars(select(SemesterResult).where(SemesterResult.user_id == user.id))
+                    for res in results.all():
+                        res.encrypted_result_detail = "deleted_result"
+                        res.iv = "deleted_iv"
+                        
+                    courses = await uow.session.scalars(select(UserCourse).where(UserCourse.user_id == user.id))
+                    for c in courses.all():
+                        assessment = await uow.session.scalar(select(Assessment).where(Assessment.user_course_id == c.id))
+                        if assessment:
+                            assessment.encrypted_assessment_detail = "deleted_assessment"
+                            assessment.encrypted_grade = "deleted_grade"
+                            assessment.iv = "deleted_iv"
+
+                    user.telegram_id = -random.randint(1000000, 9999999)
+                    user.university_id = "deleted_account"
+                    user.department_id = None
+                    user.section = "none"
+                    await uow.commit() # Flush and commit the dummy data
+                    
+                    # 2. Actually delete the scrambled row
+                    await uow.users.remove(user)
+                    
+                    # 3. Add audit log
+                    audit = AuditLog(
+                        telegram_id=request.telegram_id,
+                        action="account_deletion_requested",
+                        details={"confirmed": True},
+                    )
+                    uow.session.add(audit)
+                    await uow.commit()
+                    return AccountLifecycleResult(message="Account and all credentials securely deleted.", deleted=True)
+                    
+        else:
+            if self.user_repository is not None:
+                user = None
+                if hasattr(self.user_repository, "get_by_telegram_id"):
+                    user = await self.user_repository.get_by_telegram_id(request.telegram_id)
+                if user is not None and hasattr(self.user_repository, "remove"):
+                    await self.user_repository.remove(user)
+            if self.audit_repository is not None:
+                await self.audit_repository.add(
+                    {
+                        "telegram_id": request.telegram_id,
+                        "action": "account_deletion_requested",
+                        "details": {"confirmed": True},
+                    }
+                )
+            return AccountLifecycleResult(message="Account deletion queued", deleted=True)
+
+        return AccountLifecycleResult(message="Account deletion not available without database connection.", deleted=False)
+
+    async def update_university_id(self, telegram_id: int, new_id: str) -> bool:
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                user = await uow.users.get_by_telegram_id(telegram_id)
+                if user is not None:
+                    user.university_id = new_id
+                    await uow.commit()
+                    return True
+        return False
+
+    async def update_department(self, telegram_id: int, new_dept: str) -> bool:
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                user = await uow.users.get_by_telegram_id(telegram_id)
+                if user is not None:
+                    user.department_id = new_dept
+                    await uow.commit()
+                    return True
+        return False
+
+    async def update_password(self, telegram_id: int, new_password: str, cipher: Any) -> bool:
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from database.models import UserCredential
+            from sqlalchemy import select
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                user = await uow.users.get_by_telegram_id(telegram_id)
+                if user is not None:
+                    cred = await uow.session.scalar(select(UserCredential).where(UserCredential.user_id == user.id))
+                    if cred:
+                        enc_pw, iv = cipher.encrypt(new_password)
+                        cred.encrypted_password = enc_pw
+                        cred.iv = iv
+                        await uow.commit()
+                        return True
+        return False
+
+    async def get_decrypted_password(self, telegram_id: int, cipher: Any) -> str | None:
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from database.models import UserCredential
+            from sqlalchemy import select
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                user = await uow.users.get_by_telegram_id(telegram_id)
+                if user is not None:
+                    cred = await uow.session.scalar(select(UserCredential).where(UserCredential.user_id == user.id))
+                    if cred and cred.encrypted_password and cred.iv:
+                        return cipher.decrypt(cred.encrypted_password, cred.iv)
+        return None
