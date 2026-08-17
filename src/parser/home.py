@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 
 from clients.aau_portal import PortalSchemaChangedError, PortalDataValidationError, SchemaChangeDiagnostic
 from .models import ParserWarning, ParserWarningCode, ProfilePageResult, StudentProfileData
+from utils.html_cleaner import cleanup_html
 
 if TYPE_CHECKING:
     pass
@@ -39,46 +40,61 @@ def parse_profile_page(html: str) -> ProfilePageResult:
     soup = BeautifulSoup(html, "html.parser")
     warnings = []
 
-    # Find the profile widget section by looking for the heading "My Profile"
     profile_heading = soup.find(string=re.compile(r"My Profile", re.IGNORECASE))
+    
+    # If the profile widget is not found, it might be because the portal homepage changed.
+    # We will return default/unknown profile data instead of failing the entire scrape,
+    # because the grades (which are on a separate page) are the most important part.
     if not profile_heading:
-        diagnostic = SchemaChangeDiagnostic(
-            page_type="home",
-            detected_element="profile heading",
-            expected_selector="span with text 'My Profile'",
-            detail="Profile section not found on home page"
-        )
-        raise PortalSchemaChangedError(
-            f"Home page profile heading not found. {diagnostic.detail}",
-            diagnostic
+        warnings.append(ParserWarning(
+            code=ParserWarningCode.MISSING_OPTIONAL_PROFILE_FIELD,
+            page_kind="home",
+            detail="Profile heading 'My Profile' not found on home page."
+        ))
+        return ProfilePageResult(
+            profile=StudentProfileData(
+                full_name="Unknown",
+                student_id="Unknown",
+                department="Unknown",
+                year_level="Unknown"
+            ),
+            warnings=tuple(warnings)
         )
 
     # Find the parent widget containing the profile table
     profile_widget = profile_heading.find_parent("div", class_="widget")
     if not profile_widget:
-        diagnostic = SchemaChangeDiagnostic(
-            page_type="home",
-            detected_element="profile widget",
-            expected_selector="div.widget containing profile heading",
-            detail="Profile widget container not found"
-        )
-        raise PortalSchemaChangedError(
-            f"Could not locate profile widget. {diagnostic.detail}",
-            diagnostic
+        warnings.append(ParserWarning(
+            code=ParserWarningCode.MISSING_OPTIONAL_PROFILE_FIELD,
+            page_kind="home",
+            detail="Profile widget container not found."
+        ))
+        return ProfilePageResult(
+            profile=StudentProfileData(
+                full_name="Unknown",
+                student_id="Unknown",
+                department="Unknown",
+                year_level="Unknown"
+            ),
+            warnings=tuple(warnings)
         )
 
     # Find the profile table within the widget
     profile_table = profile_widget.find("table")
     if not profile_table:
-        diagnostic = SchemaChangeDiagnostic(
-            page_type="home",
-            detected_element="profile table",
-            expected_selector="table inside profile widget",
-            detail="No table found in profile section"
-        )
-        raise PortalSchemaChangedError(
-            f"Profile table not found. {diagnostic.detail}",
-            diagnostic
+        warnings.append(ParserWarning(
+            code=ParserWarningCode.MISSING_OPTIONAL_PROFILE_FIELD,
+            page_kind="home",
+            detail="No table found in profile section."
+        ))
+        return ProfilePageResult(
+            profile=StudentProfileData(
+                full_name="Unknown",
+                student_id="Unknown",
+                department="Unknown",
+                year_level="Unknown"
+            ),
+            warnings=tuple(warnings)
         )
 
     # Extract profile data from table rows

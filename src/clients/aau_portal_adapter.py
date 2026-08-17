@@ -109,8 +109,13 @@ class AAUPortalClient(PortalClient):
             self._validate_student_id(student_id)
 
             try:
-                self.session = aiohttp.ClientSession()
-                logger.debug("HTTP session created for portal scrape")
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                }
+                self.session = aiohttp.ClientSession(headers=headers)
+                logger.debug("HTTP session created for portal scrape with browser headers")
 
                 # Extract token from login page
                 token = await self._fetch_verification_token()
@@ -140,9 +145,15 @@ class AAUPortalClient(PortalClient):
 
                 return profile_result, grades_result
 
+            except (PortalUnavailableError, PortalAuthenticationError, PortalTimeoutError) as exc:
+                logger.warning(
+                    f"Portal scrape failed: {type(exc).__name__} - {exc}",
+                    extra={"error_type": type(exc).__name__}
+                )
+                raise
             except (PortalError, asyncio.TimeoutError) as exc:
                 logger.error(
-                    "Portal scrape failed",
+                    "Portal scrape failed due to unexpected or schema error",
                     extra={"error_type": type(exc).__name__},
                     exc_info=exc,
                 )
@@ -243,17 +254,28 @@ class AAUPortalClient(PortalClient):
             async with self.session.post(
                 f"{self.BASE_URL}{self.LOGIN_ENDPOINT}",
                 data=login_data,
-                timeout=aiohttp.ClientTimeout(seconds=self.settings.portal_timeout_seconds),
+                timeout=aiohttp.ClientTimeout(total=self.settings.portal_timeout_seconds),
                 allow_redirects=False,
             ) as resp:
+                status_code = resp.status
                 html = await resp.text()
+
                 logger.debug(
                     "Login POST completed",
                     extra={
-                        "status_code": resp.status,
+                        "status_code": status_code,
                         "student_id": student_id,
                     },
                 )
+
+                if status_code in (301, 302, 303, 307, 308):
+                    location = resp.headers.get("Location", "")
+                    if "login" in location.lower():
+                        logger.debug("Login failed - redirected back to login")
+                        return {"status": "INVALID_CREDENTIALS", "html": html}
+                    else:
+                        logger.debug("Login successful - redirected to dashboard")
+                        return {"status": "SUCCESS", "html": html}
 
                 return self._classify_login_response(html)
 
@@ -288,11 +310,22 @@ class AAUPortalClient(PortalClient):
             Dict with status and details
         """
         soup = BeautifulSoup(html, "html.parser")
-        errors_div = soup.find("div", class_="validation-summary-errors")
+        
+        import re
+        # Check if we are still on the login page
+        login_form = soup.find("form", action=re.compile(r"/login", re.IGNORECASE))
+        if not login_form:
+            # Fallback check: look for the UserName input field
+            if not soup.find("input", {"name": "UserName"}):
+                logger.debug("Login successful - navigated away from login page")
+                return {"status": "SUCCESS", "html": html}
 
+        errors_div = soup.find("div", class_="validation-summary-errors")
         if not errors_div:
-            logger.debug("Login successful - no validation errors found")
-            return {"status": "SUCCESS", "html": html}
+            # We are on the login page but no explicit validation errors. 
+            # This happens when auth fails silently or cookies are rejected.
+            logger.debug("Login failed - returned to login page without explicit errors")
+            return {"status": "INVALID_CREDENTIALS", "html": html}
 
         error_text = errors_div.get_text(strip=True)
         logger.debug(
@@ -376,7 +409,7 @@ class AAUPortalClient(PortalClient):
         try:
             async with self.session.get(
                 f"{self.BASE_URL}{endpoint}",
-                timeout=aiohttp.ClientTimeout(seconds=self.settings.portal_timeout_seconds),
+                timeout=aiohttp.ClientTimeout(total=self.settings.portal_timeout_seconds),
                 allow_redirects=True,
             ) as resp:
                 if resp.status != 200:

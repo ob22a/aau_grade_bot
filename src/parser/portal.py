@@ -5,8 +5,9 @@ from typing import Iterable
 
 from bs4 import BeautifulSoup
 
-from parser.errors import PortalDataValidationError, PortalSchemaChangedError, SchemaChangeDiagnostic
+from clients.aau_portal import PortalDataValidationError, PortalSchemaChangedError, SchemaChangeDiagnostic
 from parser.models import AssessmentReference, CourseGrade, GradeReport, GradeReportSummary
+from utils.html_cleaner import cleanup_html
 
 
 _TERM_PATTERN = re.compile(
@@ -34,10 +35,13 @@ def _parse_term_row(term_row: BeautifulSoup) -> tuple[str, str, str]:
     match = _TERM_PATTERN.search(text)
     if not match:
         raise PortalSchemaChangedError(
+            "AAU term row schema changed",
             SchemaChangeDiagnostic(
-                page_kind="grade_report",
-                expected="Academic Year : <year>, Year <label>, Semester : <label>",
-                observed_structure_fingerprint=text[:200],
+                page_type="grade_report",
+                detected_element="term_row",
+                expected_selector="Academic Year : <year>, Year <label>, Semester : <label>",
+                detail="Term row does not match expected pattern",
+                html_snippet=str(term_row)[:1000]
             )
         )
     return (
@@ -81,10 +85,13 @@ def _parse_summary_row(summary_row: BeautifulSoup) -> GradeReportSummary:
     text = summary_row.get_text(" ", strip=True)
     if "SGP" not in text:
         raise PortalSchemaChangedError(
+            "AAU summary row schema changed",
             SchemaChangeDiagnostic(
-                page_kind="grade_report",
-                expected="Summary row with SGP, SGPA, CGP, CGPA, Academic Status",
-                observed_structure_fingerprint=text[:200],
+                page_type="grade_report",
+                detected_element="summary_row",
+                expected_selector="Summary row with SGP, SGPA, CGP, CGPA, Academic Status",
+                detail="Summary row does not contain expected text",
+                html_snippet=str(summary_row)[:1000]
             )
         )
 
@@ -115,11 +122,16 @@ def parse_grade_report(html: str) -> GradeReport:
     document = BeautifulSoup(html, "html.parser")
     table = document.select_one("table#grade-report")
     if table is None:
+        table = document.select_one("table.table-bordered")
+    if table is None:
         raise PortalSchemaChangedError(
+            "AAU grade report table changed",
             SchemaChangeDiagnostic(
-                page_kind="grade_report",
-                expected="HTML table with id 'grade-report'",
-                observed_structure_fingerprint=html[:200],
+                page_type="grade_report",
+                detected_element="grade report table",
+                expected_selector="table#grade-report or table.table-bordered",
+                detail="Grade report table not found",
+                html_snippet=cleanup_html(html)
             )
         )
 
