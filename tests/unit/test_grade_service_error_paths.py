@@ -85,9 +85,9 @@ class TestCacheErrorPaths:
             service.read(GradeReadRequest(telegram_id=123, page_index=0, force_refresh=True))
         )
 
-        # Cache.get should not have been called
-        cache.get.assert_not_called()
-        assert "No grades available" in result.message
+        # Cache.get should have been called for the cooldown key
+        cache.get.assert_any_call("cooldown:scrape:123")
+        assert "Cooldown Active" in result.message
 
 
 class TestPortalScrapeErrorPaths:

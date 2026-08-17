@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from parser.errors import PortalDataValidationError, PortalSchemaChangedError
+from clients.aau_portal import PortalDataValidationError, PortalSchemaChangedError
 from parser.portal import parse_grade_report
 
 

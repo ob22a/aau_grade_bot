@@ -79,14 +79,18 @@ class GradeReadService:
         session_factory: Any | None = None,
         cipher: Any | None = None,
         portal_client: Any | None = None,
+        manual_scrape_cooldown_minutes: int = 30,
+        notification_service: Any | None = None,
     ) -> None:
         self.cache = cache
         self.repository = repository
         self.session_factory = session_factory
         self.cipher = cipher
         self.portal_client = portal_client
+        self.manual_scrape_cooldown_minutes = manual_scrape_cooldown_minutes
+        self.notification_service = notification_service
 
-    def _format_reports_to_pages(self, reports: Any) -> list[str]:
+    def _format_reports_to_pages(self, reports: Any, year_filter: str | None = None, semester_filter: str | None = None) -> list[str]:
         if not reports:
             return []
         if not isinstance(reports, (list, tuple)):
@@ -95,7 +99,32 @@ class GradeReadService:
             reports_list = list(reports)
 
         pages = []
+        filtered_reports = []
         for rep in reports_list:
+            rep_year = getattr(rep, "year_label", "N/A")
+            rep_sem = getattr(rep, "semester_label", "N/A")
+            
+            if year_filter and year_filter != "All":
+                # Ensure year matches (e.g. "Year 1" matches "Year : 1" or "Year 1")
+                # User's year_filter might be "Year 1", so we can just check if "1" is in both
+                import re
+                yf_match = re.search(r'\d+', year_filter)
+                ry_match = re.search(r'\d+', rep_year)
+                if yf_match and ry_match and yf_match.group() != ry_match.group():
+                    continue
+            
+            if semester_filter and semester_filter != "All":
+                # Ensure semester matches
+                sf_lower = semester_filter.lower()
+                rf_lower = rep_sem.lower()
+                if "one" in sf_lower and "one" not in rf_lower and "1" not in rf_lower and "i" not in rf_lower:
+                    continue
+                if "two" in sf_lower and "two" not in rf_lower and "2" not in rf_lower and "ii" not in rf_lower:
+                    continue
+                    
+            filtered_reports.append(rep)
+
+        for rep in filtered_reports:
             course_dicts = []
             for cg in getattr(rep, "course_grades", []):
                 course_dicts.append({
@@ -127,6 +156,7 @@ class GradeReadService:
 
     async def read(self, request: GradeReadRequest) -> GradeReadResult:
         cache_key = f"grades:{request.telegram_id}"
+        cooldown_key = f"cooldown:scrape:{request.telegram_id}"
 
         # 1. Try cache if available and not forced refresh
         if self.cache is not None and not request.force_refresh:
@@ -135,15 +165,50 @@ class GradeReadService:
                 try:
                     pages = json.loads(cached_val)
                     if isinstance(pages, list) and pages:
-                        idx = max(0, min(request.page_index, len(pages) - 1))
+                        # Crude filter for cached HTML strings
+                        filtered_pages = []
+                        for p in pages:
+                            if request.year_filter and request.year_filter != "All" and request.year_filter not in p:
+                                continue
+                            if request.semester_filter and request.semester_filter != "All" and request.semester_filter not in p:
+                                continue
+                            filtered_pages.append(p)
+                        
+                        if not filtered_pages:
+                            filtered_pages = pages # Fallback if filter too strict
+                            
+                        idx = max(0, min(request.page_index, len(filtered_pages) - 1))
                         return GradeReadResult(
-                            message=pages[idx],
+                            message=filtered_pages[idx],
                             cached=True,
                             current_page=idx,
-                            total_pages=len(pages),
+                            total_pages=len(filtered_pages),
                         )
                 except Exception:
                     return GradeReadResult(message=str(cached_val), cached=True)
+
+        # 1b. Check scrape cooldown if force_refresh
+        if self.cache is not None and request.force_refresh:
+            if await self.cache.get(cooldown_key):
+                # Still in cooldown, fallback to cached grades and add warning
+                cached_val = await self.cache.get(cache_key)
+                if cached_val is not None:
+                    try:
+                        pages = json.loads(cached_val)
+                        if isinstance(pages, list) and pages:
+                            idx = max(0, min(request.page_index, len(pages) - 1))
+                            return GradeReadResult(
+                                message=f"⏳ <b>Cooldown Active</b>\nYou can only refresh from the portal every {self.manual_scrape_cooldown_minutes} minutes to reduce load. Showing cached grades.\n\n{pages[idx]}",
+                                cached=True,
+                                current_page=idx,
+                                total_pages=len(pages),
+                            )
+                    except Exception:
+                        pass
+                return GradeReadResult(
+                    message=f"⏳ <b>Cooldown Active</b>\nYou can only refresh from the portal every {self.manual_scrape_cooldown_minutes} minutes. Cached grades are currently unavailable.",
+                    cached=True,
+                )
 
         # 2. Try DB and live portal scrape if credentials exist
         if self.session_factory is not None and self.cipher is not None and self.portal_client is not None:
@@ -161,10 +226,11 @@ class GradeReadService:
                                     password,
                                     db_user.university_id,
                                 )
-                                pages = self._format_reports_to_pages(grade_reports)
+                                pages = self._format_reports_to_pages(grade_reports, request.year_filter, request.semester_filter)
                                 if pages:
                                     if self.cache is not None:
                                         await self.cache.set(cache_key, json.dumps(pages), ttl_seconds=1800)
+                                        await self.cache.set(cooldown_key, "1", ttl_seconds=self.manual_scrape_cooldown_minutes * 60)
                                     idx = max(0, min(request.page_index, len(pages) - 1))
                                     return GradeReadResult(
                                         message=pages[idx],
@@ -174,6 +240,13 @@ class GradeReadService:
                                     )
                             except Exception as scrape_err:
                                 import logging
+                                from clients.aau_portal import PortalSchemaChangedError
+                                if isinstance(scrape_err, PortalSchemaChangedError) and self.notification_service is not None:
+                                    snippet = getattr(scrape_err.diagnostic, "html_snippet", "")
+                                    await self.notification_service.send_admin_alert(
+                                        f"Portal schema changed during grades refresh: {scrape_err}",
+                                        snippet
+                                    )
                                 logging.getLogger(__name__).warning(f"Portal scrape failed for user: {scrape_err}")
             except Exception as db_err:
                 import logging

@@ -2,7 +2,7 @@ import logging
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
+from pydantic import field_validator, ValidationInfo
 
 load_dotenv()
 
@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     registration_cooldown_seconds: int = 300
     manual_scrape_cooldown_minutes: int = 30
     inactivity_notice_months: int = 9
+    encryption_key: str | None = None
 
     @field_validator("port")
     @classmethod
@@ -45,12 +46,13 @@ class Settings(BaseSettings):
             raise ValueError("DATABASE_URL is required")
         return value
     
+
     # Log that the fields are None
     @field_validator("cron_secret", "redis_url", "admins_telegram_id", "metrics_secret")
     @classmethod
-    def validate_optional_fields(cls, value: str | None) -> str | None:
+    def validate_optional_fields(cls, value: str | None, info: ValidationInfo) -> str | None:
         if value is None:
-            logging.warning(f"Warning: {cls.__name__} field is None")
+            logging.warning(f"Warning: {info.field_name} field is None")
         return value
 
 def load_settings() -> Settings:

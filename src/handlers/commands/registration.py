@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import html
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -124,12 +125,20 @@ def build_registration_router(services: ApplicationServices) -> Router:
             password=text,
         )
 
+        status_msg = await message.answer("⏳ <b>Received password!</b> Authenticating with AAU portal... Please wait.", parse_mode="HTML")
         try:
             outcome = await services.registration.register(request)
             await state.clear()
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
             await message.answer(outcome.result.message, parse_mode="HTML")
         except PortalAuthenticationError:
             await state.clear()
+            if status_msg:
+                await status_msg.delete()
             await message.answer(
                 "❌ <b>Registration failed:</b> Invalid AAU username or password.\n"
                 "Please verify your portal credentials and use /register to try again.",
@@ -137,6 +146,8 @@ def build_registration_router(services: ApplicationServices) -> Router:
             )
         except PortalLockoutRiskError as exc:
             await state.clear()
+            if status_msg:
+                await status_msg.delete()
             await message.answer(
                 f"⚠️ *Registration paused for safety:*\n{exc}\n\n"
                 "Please wait a few minutes and verify your password at portal.aau.edu.et before trying again.",
@@ -144,6 +155,7 @@ def build_registration_router(services: ApplicationServices) -> Router:
             )
         except PortalTimeoutError:
             await state.clear()
+            await status_msg.delete()
             await message.answer(
                 "⏳ *Connection Timeout:* The AAU portal timed out while processing your request. "
                 "The portal may be slow or temporarily unresponsive. Please try again in a few minutes.",
@@ -151,27 +163,46 @@ def build_registration_router(services: ApplicationServices) -> Router:
             )
         except PortalUnavailableError:
             await state.clear()
+            await status_msg.delete()
             await message.answer(
                 "⚠️ *Portal Unavailable:* The AAU portal is currently down or unreachable. Please try again later.",
                 parse_mode="Markdown",
             )
-        except PortalSchemaChangedError:
+        except PortalSchemaChangedError as exc:
             await state.clear()
+            await status_msg.delete()
+            
+            # Extract HTML snippet if available
+            html_snippet = exc.diagnostic.html_snippet if exc.diagnostic and hasattr(exc.diagnostic, "html_snippet") and exc.diagnostic.html_snippet else "N/A"
+            escaped_snippet = html.escape(html_snippet)
+            admin_msg = (
+                f"🚨 <b>PORTAL SCHEMA CHANGED</b> 🚨\n\n"
+                f"A schema change was detected during registration for user <code>{message.from_user.id if message.from_user else 'Unknown'}</code>.\n"
+                f"<b>Error:</b> {exc}\n\n"
+                f"<b>HTML Snippet:</b>\n<pre><code class='language-html'>{escaped_snippet}</code></pre>"
+            )
+            # Send message to all admins using notification service
+            if hasattr(services, 'notification') and hasattr(services.notification, 'send_admin'):
+                await services.notification.send_admin(admin_msg)
+            else:
+                logger.error("Notification service not found, cannot alert admin.")
+
             await message.answer(
                 "⚠️ *Portal Layout Changed:* The AAU portal layout has changed. An administrator has been notified. Please try again later.",
                 parse_mode="Markdown",
             )
         except ValueError as exc:
             await state.clear()
+            await status_msg.delete()
             await message.answer(f"❌ {exc}. Please use /register to try again.")
         except RuntimeError as exc:
             await state.clear()
+            await status_msg.delete()
             await message.answer(f"⚠️ {exc}")
         except Exception as exc:
             await state.clear()
-            logger.error(f"Unexpected error during registration: {exc}", exc_info=True)
-            await message.answer(
-                "❌ An unexpected error occurred during registration. Please try again later."
-            )
+            await status_msg.delete()
+            logger.error("Unexpected error during registration", exc_info=exc)
+            await message.answer("⚠️ An unexpected error occurred. Please try again later.")
 
     return router

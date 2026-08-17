@@ -1,30 +1,47 @@
 import sys
+import os
 import asyncio
 import logging
 from aiohttp import web
-from src.config import load_settings
 
-logging.basicConfig(level=logging.INFO) # Necessary for root logger for all app and aiohttp logs to be printed
+# Inject src into Python path to fix module imports when run directly
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+from config import load_settings
+from bootstrap import build_http_app, build_application_services, build_dispatcher
+from aiogram import Bot
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-async def handle_health_check(request):
-  return web.Response(status=204) # No content this is better to avoid unnecessary data transfer
-
 async def main():
-  settings = load_settings()
-  if not settings.bot_token:
-    logger.critical("BOT_TOKEN is not set. Please set it in the .env file. Exiting program")
-    sys.exit(1)
-  
-  app = web.Application()
-  app.router.add_get("/",handle_health_check)
-  app.router.add_get("/health",handle_health_check)
+    settings = load_settings()
+    if not settings.bot_token:
+        logger.critical("BOT_TOKEN is not set. Please set it in the .env file. Exiting program")
+        sys.exit(1)
+        
+    # 1. Initialize Bot
+    bot = Bot(token=settings.bot_token)
+    
+    # 2. Build Services and Dispatcher
+    services = build_application_services(settings, bot)
+    dp = build_dispatcher(settings, services)
+    
+    # 3. Build Web App
+    app = build_http_app(settings)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', settings.port)
+    await site.start()
+    
+    logger.info(f"Web server started on port {settings.port}")
+    
+    # 4. Start Polling
+    logger.info("Starting Telegram bot polling...")
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
-  runner = web.AppRunner(app)
-  await runner.setup()
-  site = web.TCPSite(runner, '0.0.0.0', settings.port)
-  await site.start()
-
-  await asyncio.Event().wait()
-
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

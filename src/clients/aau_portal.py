@@ -14,6 +14,7 @@ class SchemaChangeDiagnostic:
     detected_element: str  # e.g., "profile heading"
     expected_selector: str  # e.g., "span with text 'My Profile'"
     detail: str  # Safe summary for logging/alerts (no grades or credentials)
+    html_snippet: str | None = None  # Raw HTML snippet for admin debugging
 
 
 class PortalError(Exception):

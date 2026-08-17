@@ -134,8 +134,9 @@ class TestLoginClassification:
     """Login response classification tests."""
 
     def test_classify_successful_login(self, adapter):
-        """No validation errors = SUCCESS."""
-        html = _read_fixture("login.html")
+        """No login form = SUCCESS."""
+        # A successful login redirects or returns the dashboard without the login form
+        html = "<html><body><h1>Dashboard</h1></body></html>"
         result = adapter._classify_login_response(html)
 
         assert result["status"] == "SUCCESS"

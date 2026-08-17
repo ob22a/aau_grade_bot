@@ -3,7 +3,7 @@ from enum import Enum, auto
 from typing import List, Optional
 from datetime import datetime
 
-from sqlalchemy import JSON, Integer, String, ForeignKey, Text, DateTime, func, UniqueConstraint, Index
+from sqlalchemy import JSON, Integer, BigInteger, String, ForeignKey, Text, DateTime, func, UniqueConstraint, Index
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
 
@@ -51,7 +51,7 @@ class User(Base):
     )
 
     telegram_id: Mapped[int] = mapped_column(
-        Integer, 
+        BigInteger, 
         unique=True,
         index=True,
         nullable=False
@@ -317,7 +317,7 @@ class AuditLog(Base):
     )
 
     telegram_id: Mapped[int] = mapped_column(
-        Integer,
+        BigInteger,
         nullable=False,
         index=True
     )

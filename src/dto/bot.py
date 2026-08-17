@@ -22,6 +22,8 @@ class RegistrationResult:
 class GradeReadRequest:
     telegram_id: int
     force_refresh: bool = False
+    year_filter: str | None = None
+    semester_filter: str | None = None
     page_index: int = 0
 
 
