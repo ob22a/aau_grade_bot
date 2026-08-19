@@ -7,6 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class RegistrationFSM(StatesGroup):
     university_id = State()
+    campus = State()
     password = State()
     section = State()
     confirm = State()

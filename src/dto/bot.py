@@ -10,6 +10,7 @@ class RegistrationRequest:
     telegram_id: int
     university_id: str
     password: str
+    campus: str | None = None
     section: str | None = None
 
 

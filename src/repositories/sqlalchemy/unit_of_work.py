@@ -17,6 +17,7 @@ from .user_repository import SqlAlchemyUserRepository
 from .user_course_repository import SqlAlchemyUserCourseRepository
 from .assessment_repository import SqlAlchemyAssessmentRepository
 from .semester_result_repository import SqlAlchemySemesterResultRepository
+from .campus_repository import SqlAlchemyCampusRepository
 
 SessionFactory = Callable[[], AsyncSession]
 
@@ -28,6 +29,7 @@ class SqlAlchemyRepositoryUnitOfWork:
         self._base_uow = BaseUnitOfWork(session_factory)
         self.session: AsyncSession | None = None
         self.users: SqlAlchemyUserRepository | None = None
+        self.campuses: SqlAlchemyCampusRepository | None = None
         self.credentials: SqlAlchemyUserCredentialRepository | None = None
         self.audit_logs: SqlAlchemyAuditLogRepository | None = None
         self.settings: SqlAlchemySystemSettingRepository | None = None
@@ -43,6 +45,7 @@ class SqlAlchemyRepositoryUnitOfWork:
             raise RuntimeError("Failed to initialize SQLAlchemy session")
 
         self.users = SqlAlchemyUserRepository(self.session)
+        self.campuses = SqlAlchemyCampusRepository(self.session)
         self.credentials = SqlAlchemyUserCredentialRepository(self.session)
         self.audit_logs = SqlAlchemyAuditLogRepository(self.session)
         self.settings = SqlAlchemySystemSettingRepository(self.session)
@@ -68,6 +71,7 @@ class SqlAlchemyRepositoryUnitOfWork:
         await self._base_uow.__aexit__(exc_type, exc, traceback)
         self.session = None
         self.users = None
+        self.campuses = None
         self.credentials = None
         self.audit_logs = None
         self.settings = None

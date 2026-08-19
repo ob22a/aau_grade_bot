@@ -89,18 +89,59 @@ def build_registration_router(services: ApplicationServices) -> Router:
             )
             return
         
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Skip Section", callback_data="skip_section")],
-        ])
-
         await state.update_data(university_id=normalized_id)
-        await state.set_state(RegistrationFSM.section)
+        
+        # Fetch campuses
+        campuses = []
+        if services.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            async with SqlAlchemyRepositoryUnitOfWork(services.session_factory) as uow:
+                campuses = await uow.campuses.get_all()
+        
+        keyboard_buttons = []
+        for c in campuses:
+            keyboard_buttons.append([InlineKeyboardButton(text=c.full_name, callback_data=f"campus_{c.campus_id}")])
+            
+        # Add a skip button if needed, but user wants campus input. Let's make it mandatory if available.
+        if not campuses:
+            # Fallback to section if no campuses
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Skip Section", callback_data="skip_section")]])
+            await state.set_state(RegistrationFSM.section)
+            await message.answer(
+                "Great! Now enter your <b>Section</b> (e.g., 1,2,3):\n\n"
+                "<i>(Send /cancel at any time to abort)</i>",
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+            return
+
+        kb = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        await state.set_state(RegistrationFSM.campus)
         await message.answer(
-            "Great! Now enter your <b>Section</b> (e.g., 1,2,3):\n\n"
+            "Great! Please select your <b>Campus</b>:\n\n"
             "<i>(Send /cancel at any time to abort)</i>",
             parse_mode="HTML",
             reply_markup=kb
         )
+
+    @router.callback_query(RegistrationFSM.campus, F.data.startswith("campus_"))
+    async def capture_campus(query: CallbackQuery, state: FSMContext) -> None:
+        """Capture campus selection."""
+        campus_id = query.data.split("_", 1)[1]
+        await state.update_data(campus=campus_id)
+        await query.answer(f"Campus selected: {campus_id}")
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Skip Section", callback_data="skip_section")],
+        ])
+        await state.set_state(RegistrationFSM.section)
+        if query.message:
+            await query.message.answer(
+                "Now enter your <b>Section</b> (e.g., 1,2,3):\n\n"
+                "<i>(Send /cancel at any time to abort)</i>",
+                parse_mode="HTML",
+                reply_markup=kb
+            )
 
     @router.callback_query(RegistrationFSM.section, F.data == "skip_section")
     async def skip_section_callback(query: CallbackQuery, state: FSMContext) -> None:
@@ -173,67 +214,136 @@ def build_registration_router(services: ApplicationServices) -> Router:
                 )
             return
 
+        await state.update_data(password=text)
         data = await state.get_data()
+        
+        await state.set_state(RegistrationFSM.confirm)
+        
+        campus_id = data.get("campus", "Not specified")
+        section = data.get("section", "Not specified")
+        
+        msg = (
+            "📋 <b>Registration Summary</b>\n\n"
+            f"<b>University ID:</b> <code>{data.get('university_id')}</code>\n"
+            f"<b>Campus:</b> {campus_id}\n"
+            f"<b>Section:</b> {section}\n"
+            f"<b>Password:</b> <tg-spoiler>{text}</tg-spoiler>\n\n"
+            "Is this information correct?"
+        )
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Confirm & Register", callback_data="confirm_registration")],
+            [InlineKeyboardButton(text="✏️ Edit Password", callback_data="edit_password")],
+            [InlineKeyboardButton(text="✏️ Edit Section", callback_data="edit_section")],
+            [InlineKeyboardButton(text="✏️ Edit Campus", callback_data="edit_campus")],
+            [InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_registration")]
+        ])
+        
+        await message.answer(msg, parse_mode="HTML", reply_markup=kb)
+
+    @router.callback_query(RegistrationFSM.confirm, F.data == "cancel_registration")
+    async def confirm_cancel(query: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
+        if query.message:
+            await query.message.edit_text("Registration cancelled. Use /register to start over.")
+        await query.answer()
+
+    @router.callback_query(RegistrationFSM.confirm, F.data == "edit_password")
+    async def confirm_edit_password(query: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(RegistrationFSM.password)
+        if query.message:
+            await query.message.answer("Please send your AAU Portal Password:")
+        await query.answer()
+
+    @router.callback_query(RegistrationFSM.confirm, F.data == "edit_section")
+    async def confirm_edit_section(query: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(RegistrationFSM.section)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Skip Section", callback_data="skip_section")],
+        ])
+        if query.message:
+            await query.message.answer("Please enter your Section (e.g., 1, 2, 3) or skip:", reply_markup=kb)
+        await query.answer()
+
+    @router.callback_query(RegistrationFSM.confirm, F.data == "edit_campus")
+    async def confirm_edit_campus(query: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(RegistrationFSM.campus)
+        
+        campuses = []
+        if services.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            async with SqlAlchemyRepositoryUnitOfWork(services.session_factory) as uow:
+                campuses = await uow.campuses.get_all()
+        
+        keyboard_buttons = []
+        for c in campuses:
+            keyboard_buttons.append([InlineKeyboardButton(text=c.full_name, callback_data=f"campus_{c.campus_id}")])
+            
+        kb = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        if query.message:
+            await query.message.answer("Please select your Campus:", reply_markup=kb)
+        await query.answer()
+
+    @router.callback_query(RegistrationFSM.confirm, F.data == "confirm_registration")
+    async def confirm_register(query: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        
         request = RegistrationRequest(
-            telegram_id=message.from_user.id if message.from_user else 0,
+            telegram_id=query.from_user.id,
             university_id=data.get("university_id", ""),
-            password=text,
-            section=data.get("section"),
+            password=data.get("password", ""),
+            campus=data.get("campus"),
+            section=str(data.get("section")) if data.get("section") is not None else None,
         )
 
-        status_msg = await message.answer("⏳ <b>Received password!</b> Authenticating with AAU portal... Please wait.", parse_mode="HTML")
+        if query.message:
+            await query.message.edit_text("⏳ <b>Authenticating with AAU portal... Please wait.</b>", parse_mode="HTML")
+            
         try:
             outcome = await services.registration.register(request)
             await state.clear()
-            if status_msg:
-                try:
-                    await status_msg.delete()
-                except Exception:
-                    pass
-            await message.answer(outcome.result.message, parse_mode="HTML")
+            if query.message:
+                await query.message.answer(outcome.result.message, parse_mode="HTML")
         except PortalAuthenticationError:
             await state.clear()
-            if status_msg:
-                await status_msg.delete()
-            await message.answer(
-                "❌ <b>Registration failed:</b> Invalid AAU username or password.\n"
-                "Please verify your portal credentials and use /register to try again.",
-                parse_mode="HTML",
-            )
+            if query.message:
+                await query.message.answer(
+                    "❌ <b>Registration failed:</b> Invalid AAU username or password.\n"
+                    "Please verify your portal credentials and use /register to try again.",
+                    parse_mode="HTML",
+                )
         except PortalLockoutRiskError as exc:
             await state.clear()
-            if status_msg:
-                await status_msg.delete()
-            await message.answer(
-                f"⚠️ <b>Registration paused for safety:</b>\n{exc}\n\n"
-                "Please wait a few minutes and verify your password at portal.aau.edu.et before trying again.",
-                parse_mode="HTML",
-            )
+            if query.message:
+                await query.message.answer(
+                    f"⚠️ <b>Registration paused for safety:</b>\n{exc}\n\n"
+                    "Please wait a few minutes and verify your password at portal.aau.edu.et before trying again.",
+                    parse_mode="HTML",
+                )
         except PortalTimeoutError:
             await state.clear()
-            await status_msg.delete()
-            await message.answer(
-                "⏳ <b>Connection Timeout:</b> The AAU portal timed out while processing your request. "
-                "The portal may be slow or temporarily unresponsive. Please try again in a few minutes.",
-                parse_mode="HTML",
-            )
+            if query.message:
+                await query.message.answer(
+                    "⏳ <b>Connection Timeout:</b> The AAU portal timed out while processing your request. "
+                    "The portal may be slow or temporarily unresponsive. Please try again in a few minutes.",
+                    parse_mode="HTML",
+                )
         except PortalUnavailableError:
             await state.clear()
-            await status_msg.delete()
-            await message.answer(
-                "⚠️ <b>Portal Unavailable:</b> The AAU portal is currently down or unreachable. Please try again later.",
-                parse_mode="HTML",
-            )
+            if query.message:
+                await query.message.answer(
+                    "⚠️ <b>Portal Unavailable:</b> The AAU portal is currently down or unreachable. Please try again later.",
+                    parse_mode="HTML",
+                )
         except PortalSchemaChangedError as exc:
             await state.clear()
-            await status_msg.delete()
             
             # Extract HTML snippet if available
             html_snippet = exc.diagnostic.html_snippet if exc.diagnostic and hasattr(exc.diagnostic, "html_snippet") and exc.diagnostic.html_snippet else "N/A"
             escaped_snippet = html.escape(html_snippet)
             admin_msg = (
                 f"🚨 <b>PORTAL SCHEMA CHANGED</b> 🚨\n\n"
-                f"A schema change was detected during registration for user <code>{message.from_user.id if message.from_user else 'Unknown'}</code>.\n"
+                f"A schema change was detected during registration for user <code>{query.from_user.id if query.from_user else 'Unknown'}</code>.\n"
                 f"<b>Error:</b> {exc}\n\n"
                 f"<b>HTML Snippet:</b>\n<pre><code class='language-html'>{escaped_snippet}</code></pre>"
             )
@@ -243,22 +353,24 @@ def build_registration_router(services: ApplicationServices) -> Router:
             else:
                 logger.error("Notification service not found, cannot alert admin.")
 
-            await message.answer(
-                "⚠️ <b>Portal Layout Changed:</b> The AAU portal layout has changed. An administrator has been notified. Please try again later.",
-                parse_mode="HTML",
-            )
+            if query.message:
+                await query.message.answer(
+                    "⚠️ <b>Portal Layout Changed:</b> The AAU portal layout has changed. An administrator has been notified. Please try again later.",
+                    parse_mode="HTML",
+                )
         except ValueError as exc:
             await state.clear()
-            await status_msg.delete()
-            await message.answer(f"❌ {exc}. Please use /register to try again.")
+            if query.message:
+                await query.message.answer(f"❌ {exc}. Please use /register to try again.")
         except RuntimeError as exc:
             await state.clear()
-            await status_msg.delete()
-            await message.answer(f"⚠️ {exc}")
+            if query.message:
+                await query.message.answer(f"⚠️ {exc}")
         except Exception as exc:
             await state.clear()
-            await status_msg.delete()
             logger.error("Unexpected error during registration", exc_info=exc)
-            await message.answer("⚠️ An unexpected error occurred. Please try again later.")
+            if query.message:
+                await query.message.answer("⚠️ An unexpected error occurred. Please try again later.")
+        await query.answer()
 
     return router

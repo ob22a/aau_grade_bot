@@ -11,6 +11,7 @@ class Repository(Protocol):
 
 class UnitOfWork(Protocol):
     users: UserRepository
+    campuses: CampusRepository
     credentials: UserCredentialRepository
     audit_logs: AuditLogRepository
     settings: SystemSettingRepository
@@ -56,6 +57,9 @@ class UserRepository(Repository, Protocol):
     async def get_all_users(self) -> list[object]:
         ...
 
+class CampusRepository(Repository, Protocol):
+    async def get_all(self) -> list[object]:
+        ...
 
 class UserCredentialRepository(Repository, Protocol):
     async def get_by_user_id(self, user_id: str) -> object | None:

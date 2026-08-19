@@ -106,20 +106,43 @@ class RegistrationService:
         if self.session_factory is not None:
             try:
                 from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
-                from database.models import User, UserCredential, AuditLog
+                from database.models import User, UserCredential, AuditLog, SectionSource, Department, Course, UserCourse, Assessment
 
                 async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
                     db_user = await uow.users.get_by_telegram_id(request.telegram_id)
+                    
+                    # Resolve department
+                    dept_id = None
+                    if profile and profile.profile and profile.profile.department:
+                        from sqlalchemy import select
+                        dept_name = profile.profile.department
+                        stmt = select(Department).where(Department.full_name == dept_name)
+                        if request.campus:
+                            stmt = stmt.where(Department.campus_id == request.campus)
+                        dept = await uow.session.scalar(stmt)
+                        if dept:
+                            dept_id = dept.department_id
+
                     if db_user is None:
                         db_user = User(
                             telegram_id=request.telegram_id,
                             university_id=university_id,
-                            department_id=profile.profile.department if profile and profile.profile and profile.profile.department else None,
+                            department_id=dept_id,
                         )
                         uow.session.add(db_user)
                         await uow.session.flush()
                     else:
                         db_user.university_id = university_id
+                        if dept_id:
+                            db_user.department_id = dept_id
+
+                    # Handle Section
+                    if request.section:
+                        db_user.section = request.section
+                        db_user.section_source = SectionSource.USER_REPORTED
+                    elif profile and profile.profile and profile.profile.section:
+                        db_user.section = profile.profile.section
+                        db_user.section_source = SectionSource.SCRAPED
 
                     cred = await uow.credentials.get_by_user_id(db_user.id)
                     if cred is None:
@@ -141,9 +164,10 @@ class RegistrationService:
                     )
                     uow.session.add(audit)
                     
-                    # Persist Grade Reports to DB
+                    # Persist Grade Reports and Assessments to DB
                     if _grade_report:
                         from database.models import SemesterResult, Semester
+                        from sqlalchemy import delete, select
                         
                         def parse_semester(label: str) -> Semester:
                             lab = label.lower()
@@ -154,13 +178,13 @@ class RegistrationService:
                             return Semester.FIRST
 
                         # Clear old grades to avoid duplicates/conflicts on re-registration
-                        from sqlalchemy import delete
                         await uow.session.execute(delete(SemesterResult).where(SemesterResult.user_id == db_user.id))
 
                         for rep in _grade_report:
+                            sem = parse_semester(rep.semester_label)
+                            
                             # Serialize GradeReport to JSON
                             rep_dict = rep.model_dump()
-                            # Convert tuples to lists for JSON serialization if necessary, though model_dump handles it
                             rep_json = json.dumps(rep_dict)
                             enc_rep = self.cipher.encrypt(rep_json)
                             rep_payload = Ciphertext.from_token(enc_rep)
@@ -169,11 +193,67 @@ class RegistrationService:
                             sr = SemesterResult(
                                 user_id=db_user.id,
                                 academic_year=rep.academic_year,
-                                semester=parse_semester(rep.semester_label),
+                                semester=sem,
                                 encrypted_result_detail=enc_rep,
                                 iv=rep_iv,
                             )
                             uow.session.add(sr)
+                            
+                            # Save Courses, UserCourses, and Assessments
+                            for cg in rep.course_grades:
+                                # Ensure Course exists
+                                course_db = await uow.session.scalar(select(Course).where(Course.course_id == cg.course_code))
+                                if not course_db:
+                                    course_db = Course(
+                                        course_id=cg.course_code,
+                                        course_name=cg.course_name,
+                                        credit_hours=int(cg.credit_hours) if cg.credit_hours else 0,
+                                        ects=int(cg.ects) if cg.ects else 0,
+                                    )
+                                    uow.session.add(course_db)
+                                    await uow.session.flush()
+
+                                # Create or update UserCourse
+                                uc_stmt = select(UserCourse).where(
+                                    UserCourse.user_id == db_user.id,
+                                    UserCourse.course_id == course_db.course_id,
+                                    UserCourse.academic_year == rep.academic_year,
+                                    UserCourse.semester == sem
+                                )
+                                uc_db = await uow.session.scalar(uc_stmt)
+                                if not uc_db:
+                                    uc_db = UserCourse(
+                                        user_id=db_user.id,
+                                        course_id=course_db.course_id,
+                                        academic_year=rep.academic_year,
+                                        semester=sem
+                                    )
+                                    uow.session.add(uc_db)
+                                    await uow.session.flush()
+
+                                # Save Assessment reference
+                                asm_dict = {
+                                    "reference": cg.assessment.model_dump() if cg.assessment else None,
+                                    "grade": cg.grade
+                                }
+                                enc_asm = self.cipher.encrypt(json.dumps(asm_dict))
+                                asm_payload = Ciphertext.from_token(enc_asm)
+                                asm_iv = base64.urlsafe_b64encode(asm_payload.nonce).decode("ascii")
+
+                                asm_stmt = select(Assessment).where(Assessment.user_course_id == uc_db.id)
+                                asm_db = await uow.session.scalar(asm_stmt)
+                                if not asm_db:
+                                    asm_db = Assessment(
+                                        user_course_id=uc_db.id,
+                                        encrypted_assessment_detail=enc_asm,
+                                        encrypted_grade=enc_asm,
+                                        iv=asm_iv
+                                    )
+                                    uow.session.add(asm_db)
+                                else:
+                                    asm_db.encrypted_assessment_detail = enc_asm
+                                    asm_db.encrypted_grade = enc_asm
+                                    asm_db.iv = asm_iv
 
                     await uow.commit()
             except Exception as db_exc:
