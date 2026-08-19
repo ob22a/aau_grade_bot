@@ -56,11 +56,41 @@ class AdminService:
     async def update_setting(self, request: SettingsUpdateRequest) -> SettingsUpdateResult:
         if not request.confirm:
             return SettingsUpdateResult(message="Confirmation required before changing settings")
+            
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                await uow.settings.set(request.key, request.value)
+                await uow.commit()
+            return SettingsUpdateResult(message=f"Setting {request.key} updated")
+            
         if self.settings_repository is not None:
             await self.settings_repository.set(request.key, request.value)
-        return SettingsUpdateResult(message=f"Setting {request.key} updated")
+            return SettingsUpdateResult(message=f"Setting {request.key} updated")
+            
+        return SettingsUpdateResult(message="Failed: No repository configured")
 
     async def metrics_snapshot(self) -> MetricsSnapshot:
         if self.metrics is not None:
             return await self.metrics.snapshot()
-        return MetricsSnapshot(uptime_seconds=0)
+            
+        active_users = 0
+        details = {}
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            try:
+                async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                    users = await uow.users.get_all_users()
+                    active_users = len(users)
+            except Exception as e:
+                details["db_error"] = str(e)
+                
+        import time
+        import psutil
+        uptime_seconds = int(time.time() - psutil.Process().create_time())
+        
+        return MetricsSnapshot(
+            uptime_seconds=uptime_seconds,
+            active_users=active_users,
+            details=details
+        )

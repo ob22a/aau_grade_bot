@@ -60,9 +60,20 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
         await state.clear()
         try:
             snapshot = await services.admin.metrics_snapshot()
-            await message.answer(
-                f"Uptime: {snapshot.uptime_seconds}s\nScrapes: {snapshot.scrape_attempts}\nFailures: {snapshot.scrape_failures}"
+            
+            msg = (
+                f"📊 <b>Bot Metrics</b>\n\n"
+                f"⏱ <b>Uptime:</b> {snapshot.uptime_seconds}s\n"
+                f"👥 <b>Active Users:</b> {snapshot.active_users}\n"
+                f"🔄 <b>Scrape Attempts:</b> {snapshot.scrape_attempts}\n"
+                f"❌ <b>Scrape Failures:</b> {snapshot.scrape_failures}\n"
             )
+            if snapshot.details:
+                msg += f"\n<b>Details:</b>\n"
+                for k, v in snapshot.details.items():
+                    msg += f"• {k}: {v}\n"
+                    
+            await message.answer(msg, parse_mode="HTML")
         except Exception as exc:
             await message.answer(f"❌ Failed to fetch metrics: {exc}")
 
