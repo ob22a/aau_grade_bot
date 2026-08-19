@@ -76,7 +76,7 @@ class AAUPortalClient(PortalClient):
 
     async def scrape(
         self, username: str, password: str, student_id: str
-    ) -> tuple[ProfilePageResult, GradeReport]:
+    ) -> tuple[ProfilePageResult, tuple[GradeReport, ...]]:
         """
         Login and scrape student profile and grades in a fresh session.
 

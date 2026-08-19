@@ -70,7 +70,7 @@ class StudentProfileData(BaseModel):
 
     full_name: str
     student_id: str
-    department: str
+    department: str | None = None
     year_level: str  # e.g., "Year III"
     campus: str | None = None  # May not be visible in profile
     section: str | None = None  # May not be visible in profile

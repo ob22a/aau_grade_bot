@@ -93,10 +93,11 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             await message.answer(
                 f"🛠 <b>Admin Dashboard</b>\n\n"
                 "Commands:\n"
-                "/start_service - Enable periodic checks\n"
-                "/stop_service - Disable periodic checks\n"
+                "/setsetting <key> <value> - Update a setting\n"
                 "/metrics - View bot metrics\n"
-                "/broadcast - Send a broadcast message",
+                "/broadcast - Send a broadcast message\n"
+                "/start_service - Enable grade checking service\n"
+                "/stop_service - Disable grade checking service",
                 parse_mode="HTML"
             )
         except Exception as exc:

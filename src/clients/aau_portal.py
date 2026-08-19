@@ -56,6 +56,6 @@ class PortalClient(Protocol):
         university_id: str,
         password: str,
         student_id: str,
-    ) -> tuple[ProfilePageResult, GradeReport]:
+    ) -> tuple[ProfilePageResult, tuple[GradeReport, ...]]:
         """Scrape the portal for a single student and return stable DTOs."""
         raise NotImplementedError()

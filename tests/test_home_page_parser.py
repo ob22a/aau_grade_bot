@@ -39,8 +39,8 @@ def test_profile_data_immutable():
         result.profile.full_name = "Modified Name"  # type: ignore
 
 
-def test_missing_profile_heading_raises_schema_error():
-    """Test that missing profile heading triggers schema error."""
+def test_missing_profile_heading_returns_unknown():
+    """Test that missing profile heading returns Unknown profile."""
     html = """
     <html>
     <div class="widget stacked">
@@ -58,12 +58,13 @@ def test_missing_profile_heading_raises_schema_error():
     </html>
     """
 
-    with pytest.raises(PortalSchemaChangedError):
-        parse_profile_page(html)
+    result = parse_profile_page(html)
+    assert result.profile.full_name == "Unknown"
+    assert result.profile.student_id == "Unknown"
 
 
-def test_missing_profile_widget_raises_schema_error():
-    """Test that missing widget structure triggers schema error."""
+def test_missing_profile_widget_returns_unknown():
+    """Test that missing widget structure returns Unknown profile."""
     html = """
     <html>
     <span class="list-group-item active">My Profile</span>
@@ -77,12 +78,12 @@ def test_missing_profile_widget_raises_schema_error():
     </html>
     """
 
-    with pytest.raises(PortalSchemaChangedError):
-        parse_profile_page(html)
+    result = parse_profile_page(html)
+    assert result.profile.full_name == "Unknown"
 
 
-def test_missing_profile_table_raises_schema_error():
-    """Test that missing table structure triggers schema error."""
+def test_missing_profile_table_returns_unknown():
+    """Test that missing table structure returns Unknown profile."""
     html = """
     <html>
     <div class="widget stacked">
@@ -94,8 +95,8 @@ def test_missing_profile_table_raises_schema_error():
     </html>
     """
 
-    with pytest.raises(PortalSchemaChangedError):
-        parse_profile_page(html)
+    result = parse_profile_page(html)
+    assert result.profile.full_name == "Unknown"
 
 
 def test_missing_full_name_raises_error():

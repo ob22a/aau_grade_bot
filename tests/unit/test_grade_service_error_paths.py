@@ -25,69 +25,58 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-class TestCacheErrorPaths:
-    def test_corrupt_json_in_cache_returns_raw_string(self) -> None:
-        """When cached value is not valid JSON, return it as a raw string."""
-        cache = AsyncMock()
-        cache.get = AsyncMock(return_value="this is not json {{{")
+class TestDatabaseErrorPaths:
+    def test_corrupt_json_in_db_skips_report(self) -> None:
+        """When DB encrypted detail is not valid JSON, it skips the report."""
+        from crypto.cipher import AesGcmCipher
+        cipher = AesGcmCipher.from_base64_key(AesGcmCipher.generate_key())
+        
+        mock_user = SimpleNamespace(id="user-1", telegram_id=123, university_id="UGR/1234/16")
+        mock_db_result = SimpleNamespace(
+            user_id="user-1",
+            encrypted_result_detail=cipher.encrypt("this is not json {{{")
+        )
 
-        service = GradeReadService(cache=cache)
-        result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=0)))
+        mock_uow = AsyncMock()
+        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
+        mock_uow.__aexit__ = AsyncMock(return_value=False)
+        mock_uow.users = AsyncMock()
+        mock_uow.users.get_by_telegram_id = AsyncMock(return_value=mock_user)
+        mock_uow.session = AsyncMock()
+        mock_uow.session.scalars = AsyncMock(return_value=[mock_db_result])
 
-        assert result.cached is True
-        assert "this is not json" in result.message
-
-    def test_cache_returns_empty_list(self) -> None:
-        """When cached value is an empty JSON list, fall through to next layer."""
-        cache = AsyncMock()
-        cache.get = AsyncMock(return_value=json.dumps([]))
-
-        service = GradeReadService(cache=cache)
-        result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=0)))
-
-        # Empty list doesn't satisfy `if isinstance(pages, list) and pages:`
-        # so it falls through to the fallback message.
-        assert "No grades available" in result.message
-
-    def test_cache_returns_non_list_json_falls_through(self) -> None:
-        """When cached value is valid JSON but not a list, falls through to fallback."""
-        cache = AsyncMock()
-        cache.get = AsyncMock(return_value=json.dumps({"key": "value"}))
-
-        service = GradeReadService(cache=cache)
-        result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=0)))
-
-        # Non-list JSON fails the isinstance check and hits the except branch
-        # which returns it as a string — or falls through depending on implementation.
-        # The actual behavior: json.loads succeeds, isinstance(dict, list) is False,
-        # so it falls through the `if` block and the except is not triggered.
-        # The function then falls through to the fallback.
-        assert result is not None  # Should not crash
-
-    def test_cache_miss_with_no_other_sources(self) -> None:
-        """When cache returns None and no other sources configured, return fallback."""
-        cache = AsyncMock()
-        cache.get = AsyncMock(return_value=None)
-
-        service = GradeReadService(cache=cache)
-        result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=0)))
+        with patch("repositories.sqlalchemy.unit_of_work.SqlAlchemyRepositoryUnitOfWork", return_value=mock_uow):
+            service = GradeReadService(cipher=cipher, session_factory=MagicMock())
+            result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=0)))
 
         assert result.cached is False
         assert "No grades available" in result.message
 
-    def test_force_refresh_skips_cache(self) -> None:
-        """When force_refresh=True, cache is not consulted."""
+    def test_force_refresh_honors_cooldown(self) -> None:
+        """When force_refresh=True and cooldown is active, fallback to DB."""
         cache = AsyncMock()
-        cache.get = AsyncMock(return_value=json.dumps(["cached page"]))
+        cache.get = AsyncMock(return_value="1")  # cooldown active
 
-        service = GradeReadService(cache=cache)
-        result = _run(
-            service.read(GradeReadRequest(telegram_id=123, page_index=0, force_refresh=True))
-        )
+        from crypto.cipher import AesGcmCipher
+        cipher = AesGcmCipher.from_base64_key(AesGcmCipher.generate_key())
+        
+        mock_user = SimpleNamespace(id="user-1", telegram_id=123, university_id="UGR/1234/16")
+        mock_uow = AsyncMock()
+        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
+        mock_uow.__aexit__ = AsyncMock(return_value=False)
+        mock_uow.users = AsyncMock()
+        mock_uow.users.get_by_telegram_id = AsyncMock(return_value=mock_user)
+        mock_uow.session = AsyncMock()
+        mock_uow.session.scalars = AsyncMock(return_value=[])
 
-        # Cache.get should have been called for the cooldown key
+        with patch("repositories.sqlalchemy.unit_of_work.SqlAlchemyRepositoryUnitOfWork", return_value=mock_uow):
+            service = GradeReadService(cache=cache, cipher=cipher, session_factory=MagicMock())
+            result = _run(
+                service.read(GradeReadRequest(telegram_id=123, page_index=0, force_refresh=True))
+            )
+
         cache.get.assert_any_call("cooldown:scrape:123")
-        assert "Cooldown Active" in result.message
+        assert "No grades available" in result.message
 
 
 class TestPortalScrapeErrorPaths:
@@ -226,23 +215,57 @@ class TestDBErrorPaths:
 class TestPaginationEdgeCases:
     def test_page_index_out_of_bounds_clamped(self) -> None:
         """When page_index exceeds total pages, clamp to last page."""
-        cache = AsyncMock()
-        cache.get = AsyncMock(return_value=json.dumps(["page0", "page1"]))
+        from crypto.cipher import AesGcmCipher
+        from parser.models import GradeReport, GradeReportSummary
+        cipher = AesGcmCipher.from_base64_key(AesGcmCipher.generate_key())
+        
+        rep1 = GradeReport(warnings=(), academic_year="1", year_label="1", semester_label="One", course_grades=(), summary=GradeReportSummary(sgp=0, sgpa=0, cgp=0, cgpa=0, academic_status=""))
+        rep2 = GradeReport(warnings=(), academic_year="1", year_label="1", semester_label="Two", course_grades=(), summary=GradeReportSummary(sgp=0, sgpa=0, cgp=0, cgpa=0, academic_status=""))
 
-        service = GradeReadService(cache=cache)
-        result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=99)))
+        mock_user = SimpleNamespace(id="user-1", telegram_id=123, university_id="UGR/1234/16")
+        mock_uow = AsyncMock()
+        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
+        mock_uow.__aexit__ = AsyncMock(return_value=False)
+        mock_uow.users = AsyncMock()
+        mock_uow.users.get_by_telegram_id = AsyncMock(return_value=mock_user)
+        mock_uow.session = AsyncMock()
+        mock_uow.session.scalars = AsyncMock(return_value=[
+            SimpleNamespace(user_id="user-1", encrypted_result_detail=cipher.encrypt(json.dumps(rep1.model_dump()))),
+            SimpleNamespace(user_id="user-1", encrypted_result_detail=cipher.encrypt(json.dumps(rep2.model_dump()))),
+        ])
+
+        with patch("repositories.sqlalchemy.unit_of_work.SqlAlchemyRepositoryUnitOfWork", return_value=mock_uow):
+            service = GradeReadService(cipher=cipher, session_factory=MagicMock())
+            result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=99)))
 
         assert result.current_page == 1  # clamped to last page
         assert result.total_pages == 2
-        assert result.message == "page1"
+        assert "Two" in result.message
 
     def test_negative_page_index_clamped(self) -> None:
         """When page_index is negative, clamp to 0."""
-        cache = AsyncMock()
-        cache.get = AsyncMock(return_value=json.dumps(["page0", "page1"]))
+        from crypto.cipher import AesGcmCipher
+        from parser.models import GradeReport, GradeReportSummary
+        cipher = AesGcmCipher.from_base64_key(AesGcmCipher.generate_key())
+        
+        rep1 = GradeReport(warnings=(), academic_year="1", year_label="1", semester_label="One", course_grades=(), summary=GradeReportSummary(sgp=0, sgpa=0, cgp=0, cgpa=0, academic_status=""))
+        rep2 = GradeReport(warnings=(), academic_year="1", year_label="1", semester_label="Two", course_grades=(), summary=GradeReportSummary(sgp=0, sgpa=0, cgp=0, cgpa=0, academic_status=""))
 
-        service = GradeReadService(cache=cache)
-        result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=-5)))
+        mock_user = SimpleNamespace(id="user-1", telegram_id=123, university_id="UGR/1234/16")
+        mock_uow = AsyncMock()
+        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
+        mock_uow.__aexit__ = AsyncMock(return_value=False)
+        mock_uow.users = AsyncMock()
+        mock_uow.users.get_by_telegram_id = AsyncMock(return_value=mock_user)
+        mock_uow.session = AsyncMock()
+        mock_uow.session.scalars = AsyncMock(return_value=[
+            SimpleNamespace(user_id="user-1", encrypted_result_detail=cipher.encrypt(json.dumps(rep1.model_dump()))),
+            SimpleNamespace(user_id="user-1", encrypted_result_detail=cipher.encrypt(json.dumps(rep2.model_dump()))),
+        ])
+
+        with patch("repositories.sqlalchemy.unit_of_work.SqlAlchemyRepositoryUnitOfWork", return_value=mock_uow):
+            service = GradeReadService(cipher=cipher, session_factory=MagicMock())
+            result = _run(service.read(GradeReadRequest(telegram_id=123, page_index=-5)))
 
         assert result.current_page == 0
-        assert result.message == "page0"
+        assert "One" in result.message

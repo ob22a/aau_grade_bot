@@ -31,6 +31,7 @@ def build_unregister_router(services: ApplicationServices) -> Router:
             "Are you sure you want to delete your account? This will permanently remove your portal credentials and all cached grades from our database.\n\n"
             "This action cannot be undone.",
             reply_markup=keyboard,
+            parse_mode="HTML"
         )
 
     @router.callback_query(F.data == "confirm_unregister")

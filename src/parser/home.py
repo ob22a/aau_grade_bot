@@ -55,7 +55,7 @@ def parse_profile_page(html: str) -> ProfilePageResult:
             profile=StudentProfileData(
                 full_name="Unknown",
                 student_id="Unknown",
-                department="Unknown",
+                department=None,
                 year_level="Unknown"
             ),
             warnings=tuple(warnings)
@@ -73,7 +73,7 @@ def parse_profile_page(html: str) -> ProfilePageResult:
             profile=StudentProfileData(
                 full_name="Unknown",
                 student_id="Unknown",
-                department="Unknown",
+                department=None,
                 year_level="Unknown"
             ),
             warnings=tuple(warnings)
@@ -91,7 +91,7 @@ def parse_profile_page(html: str) -> ProfilePageResult:
             profile=StudentProfileData(
                 full_name="Unknown",
                 student_id="Unknown",
-                department="Unknown",
+                department=None,
                 year_level="Unknown"
             ),
             warnings=tuple(warnings)

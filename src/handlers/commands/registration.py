@@ -7,7 +7,7 @@ import html
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery,InlineKeyboardMarkup, InlineKeyboardButton
 
 from clients.aau_portal import (
     PortalAuthenticationError,
@@ -88,11 +88,66 @@ def build_registration_router(services: ApplicationServices) -> Router:
                 parse_mode="HTML",
             )
             return
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Skip Section", callback_data="skip_section")],
+        ])
 
         await state.update_data(university_id=normalized_id)
+        await state.set_state(RegistrationFSM.section)
+        await message.answer(
+            "Great! Now enter your <b>Section</b> (e.g., 1,2,3):\n\n"
+            "<i>(Send /cancel at any time to abort)</i>",
+            parse_mode="HTML",
+            reply_markup=kb
+        )
+
+    @router.callback_query(RegistrationFSM.section, F.data == "skip_section")
+    async def skip_section_callback(query: CallbackQuery, state: FSMContext) -> None:
+        """Skip section input and proceed to password."""
+        await query.answer("Section input skipped. Proceeding to password entry.")
+        
+        await state.update_data(section=None)
+        await state.set_state(RegistrationFSM.password)
+        if query.message:
+            await query.message.answer(
+                "Now send your <b>AAU Portal Password</b>.\n\n"
+                "<i>(Send /cancel at any time to abort)</i>",
+                parse_mode="HTML",
+            )
+    
+
+    @router.message(RegistrationFSM.section)
+    async def capture_section(message: Message, state: FSMContext) -> None:
+        """Capture section input and proceed to password."""
+        text = (message.text or "").strip()
+
+        # Intercept commands sent while waiting for input
+        if text.startswith("/"):
+            await state.clear()
+            if text.startswith("/cancel"):
+                await message.answer("Registration cancelled.")
+            else:
+                await message.answer(
+                    f"Registration cancelled because you sent '{text}'. Use /register to start over."
+                )
+            return
+
+        # Validate section input (should be a number)
+        if not text.isdigit():
+            await message.answer(
+                "❌ <b>Invalid Section format.</b>\n"
+                "Section should be a number (e.g., 1, 2, 3).\n\n"
+                "Please send a valid section, or send /cancel to abort.",
+                parse_mode="HTML",
+            )
+            return
+
+        section_number = int(text)
+        await state.update_data(section=section_number)
         await state.set_state(RegistrationFSM.password)
         await message.answer(
-            "Great! Now enter your <b>Portal Password</b> (this will be encrypted safely):\n\n"
+            "Now send your <b>AAU Portal Password</b>.\n\n"
             "<i>(Send /cancel at any time to abort)</i>",
             parse_mode="HTML",
         )
@@ -123,6 +178,7 @@ def build_registration_router(services: ApplicationServices) -> Router:
             telegram_id=message.from_user.id if message.from_user else 0,
             university_id=data.get("university_id", ""),
             password=text,
+            section=data.get("section"),
         )
 
         status_msg = await message.answer("⏳ <b>Received password!</b> Authenticating with AAU portal... Please wait.", parse_mode="HTML")

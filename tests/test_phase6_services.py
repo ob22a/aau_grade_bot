@@ -162,14 +162,25 @@ async def _registration_round_trip() -> None:
     cache = DummyCache()
     cipher = AesGcmCipher.from_base64_key(AesGcmCipher.generate_key())
 
-    service = RegistrationService(
-        portal_client=portal,
-        cipher=cipher,
-        user_repository=user_repo,
-        credential_repository=credential_repo,
-        audit_repository=audit_repo,
-        cache=cache,
-    )
+    mock_uow = AsyncMock()
+    mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
+    mock_uow.__aexit__ = AsyncMock(return_value=False)
+    mock_uow.users = AsyncMock()
+    mock_uow.users.get_by_telegram_id = AsyncMock(return_value=SimpleNamespace(id="u1", university_id="UGR/0000/16"))
+    mock_uow.credentials = AsyncMock()
+    mock_uow.credentials.get_by_user_id = AsyncMock(return_value=None)
+    mock_uow.session = AsyncMock()
+    
+    with patch("repositories.sqlalchemy.unit_of_work.SqlAlchemyRepositoryUnitOfWork", return_value=mock_uow):
+        service = RegistrationService(
+            portal_client=portal,
+            cipher=cipher,
+            user_repository=user_repo,
+            credential_repository=credential_repo,
+            audit_repository=audit_repo,
+            cache=cache,
+            session_factory=MagicMock(),
+        )
 
     outcome = await service.register(
         RegistrationRequest(
@@ -193,15 +204,33 @@ def test_registration_service_persists_and_encrypts() -> None:
 
 
 async def _grade_read_round_trip() -> None:
-    cache = DummyCache(value="cached grades text")
-    service = GradeReadService(cache=cache, repository=None)
+    from crypto.cipher import AesGcmCipher
+    from parser.models import GradeReport, GradeReportSummary
+    cipher = AesGcmCipher.from_base64_key(AesGcmCipher.generate_key())
+    
+    rep = GradeReport(warnings=(), academic_year="1", year_label="1", semester_label="One", course_grades=(), summary=GradeReportSummary(sgp=0, sgpa=0, cgp=0, cgpa=0, academic_status=""))
 
-    result = await service.read(GradeReadRequest(telegram_id=5))
-    assert result.cached is True
-    assert result.message == "cached grades text"
+    mock_user = SimpleNamespace(id="user-1", telegram_id=5, university_id="UGR/1234/16")
+    mock_uow = AsyncMock()
+    mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
+    mock_uow.__aexit__ = AsyncMock(return_value=False)
+    mock_uow.users = AsyncMock()
+    mock_uow.users.get_by_telegram_id = AsyncMock(return_value=mock_user)
+    mock_uow.session = AsyncMock()
+    import json
+    mock_uow.session.scalars = AsyncMock(return_value=[
+        SimpleNamespace(user_id="user-1", encrypted_result_detail=cipher.encrypt(json.dumps(rep.model_dump()))),
+    ])
+
+    with patch("repositories.sqlalchemy.unit_of_work.SqlAlchemyRepositoryUnitOfWork", return_value=mock_uow):
+        service = GradeReadService(cipher=cipher, session_factory=MagicMock())
+        result = await service.read(GradeReadRequest(telegram_id=5))
+
+    assert result.cached is False
+    assert "AAU Grade Report" in result.message
 
 
-def test_grade_read_service_uses_cache_first() -> None:
+def test_grade_read_service_uses_db_first() -> None:
     asyncio.run(_grade_read_round_trip())
 
 

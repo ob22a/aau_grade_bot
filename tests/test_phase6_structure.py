@@ -92,7 +92,7 @@ def test_router_builders_return_objects() -> None:
     assert build_start_router(services) is not None
     assert build_registration_router(services) is not None
     assert build_grades_router(services) is not None
-    assert build_admin_router(services) is not None
+    assert build_admin_router(Settings(), services) is not None
     assert build_fallback_router(services) is not None
 
 

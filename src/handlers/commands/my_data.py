@@ -33,8 +33,8 @@ def build_my_data_router(services: ApplicationServices) -> Router:
         from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
         
         user_obj = None
-        if services.account_lifecycle.session_factory is not None:
-            async with SqlAlchemyRepositoryUnitOfWork(services.account_lifecycle.session_factory) as uow:
+        if services.lifecycle.session_factory is not None:
+            async with SqlAlchemyRepositoryUnitOfWork(services.lifecycle.session_factory) as uow:
                 user_obj = await uow.users.get_by_telegram_id(target_id)
         
         if not user_obj:
@@ -42,12 +42,13 @@ def build_my_data_router(services: ApplicationServices) -> Router:
                 await message.answer("You are not registered. Use /register to begin.")
             return
 
-        password = await services.account_lifecycle.get_decrypted_password(target_id, services.registration.cipher)
+        password = await services.lifecycle.get_decrypted_password(target_id, services.registration.cipher)
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🆔 Change University ID", callback_data="change_uni_id")],
             [InlineKeyboardButton(text="🔄 Change Password", callback_data="change_password")],
-            [InlineKeyboardButton(text="🏫 Change Department", callback_data="change_department")]
+            [InlineKeyboardButton(text="🏫 Change Department", callback_data="change_department")],
+            [InlineKeyboardButton(text="🔄 Change Section", callback_data="change_section")]
         ])
         
         text = (
@@ -79,7 +80,7 @@ def build_my_data_router(services: ApplicationServices) -> Router:
     @router.message(ProfileUpdateState.waiting_for_uni_id, ~F.text.startswith("/"))
     async def process_uni_id_update(message: Message, state: FSMContext) -> None:
         new_id = message.text.strip().upper()
-        success = await services.account_lifecycle.update_university_id(message.from_user.id, new_id)
+        success = await services.lifecycle.update_university_id(message.from_user.id, new_id)
         
         if success:
             await message.answer(f"✅ University ID updated to: <tg-spoiler>{html.escape(new_id)}</tg-spoiler>\n\n⚠️ <b>Important:</b> If your password also changed, please update it now to enable grade checking.", parse_mode="HTML")
@@ -101,31 +102,31 @@ def build_my_data_router(services: ApplicationServices) -> Router:
         try:
             await message.delete()
         except Exception:
-            logger.warning("Could not delete password message")
+            pass
+        
+        if not hasattr(services, 'registration') or not hasattr(services.registration, 'cipher'):
+            await message.answer("❌ Encryption service not available.")
+            await state.clear()
+            return
             
-        success = await services.account_lifecycle.update_password(message.from_user.id, new_password, services.registration.cipher)
-        
+        success = await services.lifecycle.update_password(message.from_user.id, new_password, services.registration.cipher)
         if success:
-            await message.answer("✅ <b>Password updated!</b>", parse_mode="HTML")
+            await message.answer("✅ Password successfully updated and encrypted.")
         else:
-            await message.answer("❌ Failed to update Password.")
-        
+            await message.answer("❌ Failed to update password. You may need to /register first.")
         await state.clear()
         await cmd_my_data(message, state)
 
     @router.callback_query(F.data == "change_department")
     async def cb_change_department(callback: CallbackQuery, state: FSMContext) -> None:
-        await callback.message.answer(
-            "Please enter your <b>Department Code</b> (e.g., SITE, CIVIL, MECHANICAL):",
-            parse_mode="HTML"
-        )
+        await callback.message.answer("Please enter your <b>Department Code</b> (e.g., SITE, CIVIL, MECHANICAL):", parse_mode="HTML")
         await state.set_state(ProfileUpdateState.waiting_for_dept)
         await callback.answer()
 
     @router.message(ProfileUpdateState.waiting_for_dept, ~F.text.startswith("/"))
     async def process_dept_update(message: Message, state: FSMContext) -> None:
         new_dept = message.text.strip().upper()
-        success = await services.account_lifecycle.update_department(message.from_user.id, new_dept)
+        success = await services.lifecycle.update_department(message.from_user.id, new_dept)
         
         if success:
             await message.answer(f"✅ Department updated to: <code>{html.escape(new_dept)}</code>", parse_mode="HTML")

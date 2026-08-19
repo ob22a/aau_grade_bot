@@ -39,26 +39,34 @@ def test_format_grade_report_page_with_assessments() -> None:
 
     assert "SECT-3082 Software Engineering II" in formatted
     assert "Credits: 3 | ECTS: 5 | Grade: *A*" in formatted
-    assert "Assessment Breakdown:" in formatted
-    assert "Quiz 1: `9.5`" in formatted
-    assert "Midterm Exam: `27.0`" in formatted
-    assert "Final Exam: `44.0`" in formatted
-    assert "Total Mark:* `88.5%`" in formatted
+    assert "Assessment Breakdown:" not in formatted
+    assert "Total Mark:" not in formatted
     assert "SGPA: `4.00` | CGPA: `3.92`" in formatted
 
 
-def test_build_grades_keyboard_pagination() -> None:
-    # Test single page keyboard (has nav indicator row + refresh row)
-    keyboard_single = build_grades_keyboard(current_page=0, total_pages=1)
-    assert len(keyboard_single.inline_keyboard) == 2
-    assert keyboard_single.inline_keyboard[0][0].callback_data == "grade_noop"
-    assert keyboard_single.inline_keyboard[1][0].callback_data == "grade_refresh"
-
-    # Test multi-page keyboard (middle page)
-    keyboard_multi = build_grades_keyboard(current_page=1, total_pages=3)
-    assert len(keyboard_multi.inline_keyboard) == 2
-    row0 = keyboard_multi.inline_keyboard[0]
-    assert len(row0) == 3
-    assert row0[0].callback_data == "grade_page:0"
-    assert row0[1].callback_data == "grade_noop"
-    assert row0[2].callback_data == "grade_page:2"
+from parser.models import GradeReport, GradeReportSummary, CourseGrade, AssessmentReference
+def test_build_grades_keyboard_courses() -> None:
+    # Test keyboard with course inline buttons
+    report = GradeReport(
+        warnings=(),
+        academic_year="2025/26",
+        year_label="Year 1",
+        semester_label="Semester One",
+        course_grades=(
+            CourseGrade(
+                course_number=1,
+                course_name="Course 1",
+                course_code="C1",
+                credit_hours=3,
+                ects=5,
+                grade="A",
+                assessment=AssessmentReference(academic_year_id="1", semester_id="1", course_id="1")
+            ),
+        ),
+        summary=GradeReportSummary(sgp=0, sgpa=0, cgp=0, cgpa=0, academic_status="")
+    )
+    keyboard = build_grades_keyboard(year="2025/26", semester="One", report=report)
+    assert len(keyboard.inline_keyboard) == 3
+    assert keyboard.inline_keyboard[0][0].callback_data == "grade_c:2025/26:One:0"
+    assert keyboard.inline_keyboard[1][0].callback_data == "grade_r:2025/26:One"
+    assert keyboard.inline_keyboard[2][0].callback_data == "grade_y:2025/26"

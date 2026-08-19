@@ -10,6 +10,7 @@ class RegistrationRequest:
     telegram_id: int
     university_id: str
     password: str
+    section: str | None = None
 
 
 @dataclass(frozen=True)
@@ -27,12 +28,14 @@ class GradeReadRequest:
     page_index: int = 0
 
 
+from typing import Any
 @dataclass(frozen=True)
 class GradeReadResult:
     message: str
     cached: bool = False
     current_page: int = 0
     total_pages: int = 1
+    report: Any | None = None
 
 
 

@@ -118,7 +118,7 @@ def _find_grade_rows(rows: Iterable[BeautifulSoup]) -> list[BeautifulSoup]:
     return [row for row in rows if "yrsm" not in row.get("class", [])]
 
 
-def parse_grade_report(html: str) -> GradeReport:
+def parse_grade_report(html: str) -> tuple[GradeReport, ...]:
     document = BeautifulSoup(html, "html.parser")
     table = document.select_one("table#grade-report")
     if table is None:
@@ -139,21 +139,42 @@ def parse_grade_report(html: str) -> GradeReport:
     if len(rows) < 3:
         raise PortalDataValidationError("Grade report contains too few rows")
 
-    term_row = rows[0]
-    summary_row = rows[-1]
-    course_rows = _find_grade_rows(rows[1:-1])
+    reports: list[GradeReport] = []
+    
+    current_term_row = None
+    current_courses = []
+    
+    for row in rows:
+        # Check if it's the header row, skip it
+        if "success" in row.get("class", []):
+            continue
+            
+        if "yrsm" in row.get("class", []):
+            text = row.get_text(" ", strip=True)
+            if "Academic Year" in text:
+                current_term_row = row
+                current_courses = []
+            elif "SGP" in text and current_term_row is not None:
+                # End of a block
+                summary_row = row
+                
+                academic_year, year_label, semester_label = _parse_term_row(current_term_row)
+                summary = _parse_summary_row(summary_row)
+                course_grades = tuple(_parse_course_row(r) for r in current_courses)
+                
+                reports.append(GradeReport(
+                    academic_year=academic_year,
+                    year_label=year_label,
+                    semester_label=semester_label,
+                    course_grades=course_grades,
+                    summary=summary,
+                ))
+                current_term_row = None
+        else:
+            if current_term_row is not None:
+                current_courses.append(row)
 
-    if not course_rows:
-        raise PortalDataValidationError("No course rows found in grade report")
+    if not reports:
+        raise PortalDataValidationError("No grade report sections found")
 
-    academic_year, year_label, semester_label = _parse_term_row(term_row)
-    course_grades = tuple(_parse_course_row(row) for row in course_rows)
-    summary = _parse_summary_row(summary_row)
-
-    return GradeReport(
-        academic_year=academic_year,
-        year_label=year_label,
-        semester_label=semester_label,
-        course_grades=course_grades,
-        summary=summary,
-    )
+    return tuple(reports)
