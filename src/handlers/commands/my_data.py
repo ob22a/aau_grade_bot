@@ -22,10 +22,16 @@ def build_my_data_router(services: ApplicationServices) -> Router:
     @router.callback_query(F.data == "my_data")
     async def cb_my_data(callback_query: CallbackQuery, state: FSMContext) -> None:
         await callback_query.answer()
+        if callback_query.from_user:
+            import asyncio
+            asyncio.create_task(services.lifecycle.bump_last_used(callback_query.from_user.id))
         await show_my_data_logic(callback_query.message, services, user_id=callback_query.from_user.id)
 
     @router.message(Command("my_data"))
     async def cmd_my_data(message: Message, state: FSMContext, user_id: int = None) -> None:
+        if message.from_user:
+            import asyncio
+            asyncio.create_task(services.lifecycle.bump_last_used(message.from_user.id))
         await show_my_data_logic(message, services, user_id)
         target_id = user_id or message.from_user.id
         

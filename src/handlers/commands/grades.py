@@ -85,12 +85,16 @@ def build_grades_router(services: ApplicationServices) -> Router:
     @router.message(Command("grades"))
     async def grades(message: Message, state: FSMContext) -> None:
         await state.clear()
+        if message.from_user:
+            asyncio.create_task(services.lifecycle.bump_last_used(message.from_user.id))
         kb = build_year_keyboard()
         await message.answer("Select the <b>Academic Year</b> you want to check:", reply_markup=kb, parse_mode="HTML")
 
     @router.callback_query(F.data == "view_grades")
     async def view_grades_callback(query: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
+        if query.from_user:
+            asyncio.create_task(services.lifecycle.bump_last_used(query.from_user.id))
         kb = build_year_keyboard()
         if query.message:
             await query.message.answer("Select the <b>Academic Year</b> you want to check:", reply_markup=kb, parse_mode="HTML")

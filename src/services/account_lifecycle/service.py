@@ -176,3 +176,53 @@ class AccountLifecycleService:
                         section=user.section
                     )
         return None
+
+    async def cleanup_inactive_users(self, inactivity_days: int) -> int:
+        """Find and remove users who haven't used the bot for `inactivity_days`."""
+        if self.session_factory is None:
+            return 0
+            
+        from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+        from database.models import User
+        from sqlalchemy import select
+        from datetime import datetime, timedelta, timezone
+        from dto.bot import AccountDeletionRequest
+        import logging
+        
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=inactivity_days)
+        deleted_count = 0
+        
+        async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+            stmt = select(User).where(User.last_used < cutoff_date)
+            inactive_users = await uow.session.scalars(stmt)
+            users_to_delete = inactive_users.all()
+            
+        for user in users_to_delete:
+            req = AccountDeletionRequest(telegram_id=user.telegram_id, confirm=True)
+            res = await self.request_deletion(req)
+            if res.deleted:
+                deleted_count += 1
+                if self.notifier is not None:
+                    try:
+                        await self.notifier.send_message(
+                            user.telegram_id, 
+                            "⚠️ <b>Account Removed</b>\n\nYour account has been automatically removed due to prolonged inactivity to protect your data. To use the bot again, please register."
+                        )
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"Could not notify inactive user {user.telegram_id}: {e}")
+                        
+        if deleted_count > 0 and self.notifier is not None:
+            await self.notifier.send_admin_alert(f"🧹 <b>Inactivity Cleanup</b>\nRemoved {deleted_count} inactive users (> {inactivity_days} days).")
+            
+        return deleted_count
+
+    async def bump_last_used(self, telegram_id: int) -> None:
+        """Update the last_used timestamp for the given user."""
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from sqlalchemy import func
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                user = await uow.users.get_by_telegram_id(telegram_id)
+                if user is not None:
+                    user.last_used = func.now()
+                    await uow.commit()
