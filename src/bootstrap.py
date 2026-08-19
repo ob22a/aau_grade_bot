@@ -126,6 +126,10 @@ def build_dispatcher(settings: Settings, services: ApplicationServices) -> Dispa
         with suppress(Exception):
             storage = RedisStorage.from_url(settings.redis_url)
     dispatcher = Dispatcher(storage=storage)
+    
+    from handlers.middlewares.logging import LoggingMiddleware
+    dispatcher.update.middleware(LoggingMiddleware())
+    
     dispatcher.include_router(build_start_router(services))
     dispatcher.include_router(build_registration_router(services))
     dispatcher.include_router(build_grades_router(services))

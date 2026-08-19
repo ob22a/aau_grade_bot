@@ -10,6 +10,7 @@ from dto.bot import AccountDeletionRequest
 
 @dataclass(frozen=True)
 class AccountLifecycleResult:
+    """Result of an account lifecycle action."""
     message: str
     deleted: bool = False
 
@@ -28,6 +29,7 @@ class AccountLifecycleService:
         self.session_factory = session_factory
 
     async def is_registered(self, telegram_id: int) -> bool:
+        """Returns True if the user exists in the database."""
         if self.session_factory is not None:
             from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
             async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
@@ -36,6 +38,10 @@ class AccountLifecycleService:
         return False
 
     async def request_deletion(self, request: AccountDeletionRequest) -> AccountLifecycleResult:
+        """
+        Securely deletes a user's account and scrambles their data.
+        Ensures irreversible removal of credentials and grades.
+        """
         if not request.confirm:
             return AccountLifecycleResult(message="Confirmation required before deletion")
             

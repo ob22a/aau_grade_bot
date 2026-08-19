@@ -12,6 +12,7 @@ from parser.models import GradeReport, CourseGrade, AssessmentReference, GradeRe
 
 @dataclass(frozen=True)
 class CachedGradeSnapshot:
+    """Snapshot of a grade report lookup."""
     message: str
     cached: bool
 
@@ -162,6 +163,11 @@ class GradeReadService:
         return pages
 
     async def read(self, request: GradeReadRequest) -> GradeReadResult:
+        """
+        Reads a user's grade reports, prioritizing the database cache.
+        If `force_refresh` is True, it attempts a live portal scrape, respecting cooldown limits.
+        Filters by year and semester if specified.
+        """
         cooldown_key = f"cooldown:scrape:{request.telegram_id}"
 
         # 1b. Check scrape cooldown if force_refresh

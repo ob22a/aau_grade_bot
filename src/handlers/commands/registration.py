@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_registration_router(services: ApplicationServices) -> Router:
+    """Builds and registers all profile registration commands and states."""
     router = Router()
 
     @router.message(Command("cancel"))

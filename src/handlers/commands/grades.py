@@ -13,6 +13,7 @@ from services.container import ApplicationServices
 
 
 def build_year_keyboard() -> InlineKeyboardMarkup:
+    """Builds the inline keyboard for selecting an academic year."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -34,6 +35,7 @@ def build_year_keyboard() -> InlineKeyboardMarkup:
     )
 
 def build_semester_keyboard(year: str) -> InlineKeyboardMarkup:
+    """Builds the inline keyboard for selecting a semester."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -50,6 +52,7 @@ def build_semester_keyboard(year: str) -> InlineKeyboardMarkup:
     )
 
 def build_grades_keyboard(year: str, semester: str, report: Any | None = None, current_page: int = 0, total_pages: int = 1) -> InlineKeyboardMarkup:
+    """Builds the pagination and assessment drilldown keyboard for a grade report."""
     buttons = []
 
     if report is not None:
@@ -80,6 +83,7 @@ def build_grades_keyboard(year: str, semester: str, report: Any | None = None, c
 
 
 def build_grades_router(services: ApplicationServices) -> Router:
+    """Builds and registers all grade-viewing commands and interactive callbacks."""
     router = Router()
 
     @router.message(Command("grades"))

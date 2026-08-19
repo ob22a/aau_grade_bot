@@ -10,12 +10,14 @@ from dto.bot import BroadcastRequest, SettingsUpdateRequest, MetricsSnapshot
 
 @dataclass(frozen=True)
 class BroadcastResult:
+    """Result of an admin broadcast operation."""
     message: str
     recipients: int = 0
 
 
 @dataclass(frozen=True)
 class SettingsUpdateResult:
+    """Result of an admin settings update operation."""
     message: str
 
 
@@ -29,6 +31,10 @@ class AdminService:
         self.session_factory = session_factory
 
     async def broadcast(self, request: BroadcastRequest) -> BroadcastResult:
+        """
+        Broadcasts a message to a list of target telegram IDs.
+        If no target IDs are provided, it broadcasts to all registered users.
+        """
         recipients = 0
         target_ids = request.recipient_ids or []
         
@@ -54,6 +60,7 @@ class AdminService:
         return BroadcastResult(message=f"Broadcast sent to {recipients} users", recipients=recipients)
 
     async def update_setting(self, request: SettingsUpdateRequest) -> SettingsUpdateResult:
+        """Updates a global system setting in the database."""
         if not request.confirm:
             return SettingsUpdateResult(message="Confirmation required before changing settings")
             
@@ -71,6 +78,7 @@ class AdminService:
         return SettingsUpdateResult(message="Failed: No repository configured")
 
     async def metrics_snapshot(self) -> MetricsSnapshot:
+        """Generates a snapshot of current system metrics and active user counts."""
         if self.metrics is not None:
             return await self.metrics.snapshot()
             

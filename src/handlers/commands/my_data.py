@@ -12,11 +12,13 @@ from config import Settings
 logger = logging.getLogger(__name__)
 
 class ProfileUpdateState(StatesGroup):
+    """FSM states for updating user profile fields."""
     waiting_for_uni_id = State()
     waiting_for_password = State()
     waiting_for_dept = State()
 
 def build_my_data_router(services: ApplicationServices) -> Router:
+    """Builds and registers all profile viewing and modification commands."""
     router = Router()
 
     @router.callback_query(F.data == "my_data")

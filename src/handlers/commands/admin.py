@@ -23,17 +23,20 @@ class AdminFilter(BaseFilter):
         return message.from_user and message.from_user.id in self.admin_ids
 
 def build_admin_router(settings: Settings, services: ApplicationServices) -> Router:
+    """Builds and registers all admin-only commands and states."""
     router = Router()
     router.message.filter(AdminFilter(settings.admins_telegram_id))
 
     @router.message(Command("broadcast"))
     async def begin_broadcast(message: Message, state: FSMContext) -> None:
+        """Starts the broadcast workflow by asking for the message text."""
         await state.clear()
         await state.set_state(AdminBroadcastFSM.message)
         await message.answer("Send the broadcast text.\n\n<i>(Send /cancel to abort)</i>", parse_mode="HTML")
 
     @router.message(AdminBroadcastFSM.message)
     async def capture_broadcast(message: Message, state: FSMContext) -> None:
+        """Receives the broadcast text and sends it to all users."""
         text = message.text or ""
         if text.startswith("/"):
             await state.clear()
@@ -57,6 +60,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
 
     @router.message(Command("metrics"))
     async def metrics(message: Message, state: FSMContext) -> None:
+        """Shows system uptime and active user counts."""
         await state.clear()
         try:
             snapshot = await services.admin.metrics_snapshot()

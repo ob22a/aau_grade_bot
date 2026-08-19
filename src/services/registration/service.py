@@ -28,6 +28,7 @@ class AuditWriter(Protocol):
 
 @dataclass(frozen=True)
 class RegistrationOutcome:
+    """Result of a registration attempt."""
     profile: ProfilePageResult
     result: RegistrationResult
 
@@ -54,6 +55,10 @@ class RegistrationService:
         self.session_factory = session_factory
 
     async def register(self, request: RegistrationRequest) -> RegistrationOutcome:
+        """
+        Coordinates user registration.
+        Validates credentials via portal scrape, writes user details, and logs the audit event.
+        """
         university_id = normalize_aau_undergraduate_id(request.university_id)
 
         if self.cache is not None:

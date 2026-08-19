@@ -1,4 +1,4 @@
-import asyncio
+"""Cron and cohort scan orchestration service."""
 import json
 import base64
 import logging
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SchedulerRunResult:
+    """Result of a single scheduler execution run."""
     started_at: datetime
     finished_at: datetime | None = None
     skipped: bool = False
@@ -114,6 +115,17 @@ class SchedulerService:
         return new_released
 
     async def run_once(self) -> SchedulerRunResult:
+        """
+        Executes a single pass of the background cron scheduler.
+        
+        This method will:
+        1. Acquire a distributed lock to prevent concurrent cron executions.
+        2. Clean up inactive user accounts (if enabled).
+        3. Identify and update live cohorts based on the current academic term.
+        4. Scrape the portal for a representative user of each cohort.
+        5. If grades change for a cohort, trigger an exhaustive scrape for that cohort.
+        6. Send targeted notifications to users who received grades, and informative broadcasts to those who did not.
+        """
         started_at = datetime.now(timezone.utc)
         lock_key = "cron:run"
         if self.lock is not None:

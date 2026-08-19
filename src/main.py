@@ -10,8 +10,9 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from config import load_settings
 from bootstrap import build_http_app, build_application_services, build_dispatcher
 from aiogram import Bot
+from utils.logging import configure_logging
 
-logging.basicConfig(level=logging.INFO)
+configure_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def main():
