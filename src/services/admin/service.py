@@ -35,11 +35,9 @@ class AdminService:
         # If no explicit recipients provided, fetch all users from the DB
         if not target_ids and self.session_factory is not None:
             from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
-            from sqlalchemy import select
-            from database.models import User
             async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
-                result = await uow.session.scalars(select(User.telegram_id))
-                target_ids = list(result.all())
+                all_users = await uow.users.get_all_users()
+                target_ids = [u.telegram_id for u in all_users]
         
         if self.notifier is not None and target_ids:
             for telegram_id in target_ids:

@@ -33,3 +33,8 @@ class SqlAlchemyUserRepository:
 
     async def remove(self, user: User) -> None:
         await self.session.delete(user)
+
+    async def get_all_users(self) -> list[User]:
+        statement = select(User)
+        result = await self.session.execute(statement)
+        return list(result.scalars().all())

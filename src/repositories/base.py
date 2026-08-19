@@ -10,6 +10,15 @@ class Repository(Protocol):
 
 
 class UnitOfWork(Protocol):
+    users: UserRepository
+    credentials: UserCredentialRepository
+    audit_logs: AuditLogRepository
+    settings: SystemSettingRepository
+    cron_runs: CronRunRepository
+    user_courses: UserCourseRepository
+    assessments: AssessmentRepository
+    semester_results: SemesterResultRepository
+
     async def __aenter__(self) -> UnitOfWork:
         ...
 
@@ -42,6 +51,9 @@ class UserRepository(Repository, Protocol):
         ...
 
     async def remove(self, user: object) -> None:
+        ...
+
+    async def get_all_users(self) -> list[object]:
         ...
 
 
