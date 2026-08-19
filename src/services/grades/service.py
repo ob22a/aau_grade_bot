@@ -25,9 +25,9 @@ def format_grade_report_page(
 ) -> str:
     """Format a single term/semester grade report with detailed inline assessments."""
     lines = [
-        f"🎓 *AAU Grade Report*",
-        f"📅 *Academic Year:* {academic_year} | *Year:* {year_label}",
-        f"📘 *Semester:* {semester_label}",
+        f"🎓 <b>AAU Grade Report</b>",
+        f"📅 <b>Academic Year:</b> {academic_year} | <b>Year:</b> {year_label}",
+        f"📘 <b>Semester:</b> {semester_label}",
         "──────────────────────────────",
     ]
 
@@ -41,16 +41,16 @@ def format_grade_report_page(
             ects = course.get("ects", 0)
             grade = course.get("grade", "N/A")
 
-            lines.append(f"📚 *{code} {name}*".strip())
-            lines.append(f"  • Credits: {credits} | ECTS: {ects} | Grade: *{grade}*")
+            lines.append(f"📚 <b>{code} {name}</b>".strip())
+            lines.append(f"  • Credits: {credits} | ECTS: {ects} | Grade: <b>{grade}</b>")
             lines.append("")
-        sgp = summary.get("sgp", 0.0)
-        sgpa = summary.get("sgpa", 0.0)
-        cgpa = summary.get("cgpa", 0.0)
-        status = summary.get("academic_status", "Active")
+        sgp = summary.get("sgp", 0.0) if summary else 0.0
+        sgpa = summary.get("sgpa", 0.0) if summary else 0.0
+        cgpa = summary.get("cgpa", 0.0) if summary else 0.0
+        status = summary.get("academic_status", "Active") if summary else "Active"
         lines.append("──────────────────────────────")
-        lines.append(f"📊 *Summary:* SGPA: `{sgpa:.2f}` | CGPA: `{cgpa:.2f}`")
-        lines.append(f"Status: *{status}*")
+        lines.append(f"📊 <b>Summary:</b> SGPA: <code>{sgpa:.2f}</code> | CGPA: <code>{cgpa:.2f}</code>")
+        lines.append(f"Status: <b>{status}</b>")
 
     return "\n".join(lines)
 

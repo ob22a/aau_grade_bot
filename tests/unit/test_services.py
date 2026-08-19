@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from crypto.cipher import AesGcmCipher
 from dto.bot import (
@@ -110,7 +111,7 @@ class DummyPortal:
             ),
             summary=GradeReportSummary(sgp=4.0, sgpa=4.0, cgp=4.0, cgpa=4.0, academic_status="Good"),
         )
-        return profile, grade_report
+        return profile, (grade_report,)
 
 
 @dataclass

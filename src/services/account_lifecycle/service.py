@@ -139,9 +139,12 @@ class AccountLifecycleService:
                 if user is not None:
                     cred = await uow.session.scalar(select(UserCredential).where(UserCredential.user_id == user.id))
                     if cred:
-                        enc_pw, iv = cipher.encrypt(new_password)
-                        cred.encrypted_password = enc_pw
-                        cred.iv = iv
+                        import base64
+                        from crypto.cipher import Ciphertext
+                        encrypted_token = cipher.encrypt(new_password)
+                        payload = Ciphertext.from_token(encrypted_token)
+                        cred.encrypted_password = encrypted_token
+                        cred.iv = base64.urlsafe_b64encode(payload.nonce).decode("ascii")
                         await uow.commit()
                         return True
         return False
@@ -155,6 +158,21 @@ class AccountLifecycleService:
                 user = await uow.users.get_by_telegram_id(telegram_id)
                 if user is not None:
                     cred = await uow.session.scalar(select(UserCredential).where(UserCredential.user_id == user.id))
-                    if cred and cred.encrypted_password and cred.iv:
-                        return cipher.decrypt(cred.encrypted_password, cred.iv)
+                    if cred and cred.encrypted_password:
+                        return cipher.decrypt(cred.encrypted_password)
+        return None
+
+    async def get_user_profile(self, telegram_id: int) -> Any | None:
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from dto.bot import UserProfileDTO
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                user = await uow.users.get_by_telegram_id(telegram_id)
+                if user is not None:
+                    return UserProfileDTO(
+                        telegram_id=user.telegram_id,
+                        university_id=user.university_id,
+                        department_id=user.department_id,
+                        section=user.section
+                    )
         return None

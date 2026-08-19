@@ -19,7 +19,3 @@ class AdminBroadcastFSM(StatesGroup):
 
 class AccountDeletionFSM(StatesGroup):
     confirm = State()
-
-
-class SectionFSM(StatesGroup):
-    section = State()

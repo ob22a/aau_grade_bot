@@ -205,24 +205,24 @@ def build_registration_router(services: ApplicationServices) -> Router:
             if status_msg:
                 await status_msg.delete()
             await message.answer(
-                f"⚠️ *Registration paused for safety:*\n{exc}\n\n"
+                f"⚠️ <b>Registration paused for safety:</b>\n{exc}\n\n"
                 "Please wait a few minutes and verify your password at portal.aau.edu.et before trying again.",
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
         except PortalTimeoutError:
             await state.clear()
             await status_msg.delete()
             await message.answer(
-                "⏳ *Connection Timeout:* The AAU portal timed out while processing your request. "
+                "⏳ <b>Connection Timeout:</b> The AAU portal timed out while processing your request. "
                 "The portal may be slow or temporarily unresponsive. Please try again in a few minutes.",
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
         except PortalUnavailableError:
             await state.clear()
             await status_msg.delete()
             await message.answer(
-                "⚠️ *Portal Unavailable:* The AAU portal is currently down or unreachable. Please try again later.",
-                parse_mode="Markdown",
+                "⚠️ <b>Portal Unavailable:</b> The AAU portal is currently down or unreachable. Please try again later.",
+                parse_mode="HTML",
             )
         except PortalSchemaChangedError as exc:
             await state.clear()
@@ -244,8 +244,8 @@ def build_registration_router(services: ApplicationServices) -> Router:
                 logger.error("Notification service not found, cannot alert admin.")
 
             await message.answer(
-                "⚠️ *Portal Layout Changed:* The AAU portal layout has changed. An administrator has been notified. Please try again later.",
-                parse_mode="Markdown",
+                "⚠️ <b>Portal Layout Changed:</b> The AAU portal layout has changed. An administrator has been notified. Please try again later.",
+                parse_mode="HTML",
             )
         except ValueError as exc:
             await state.clear()

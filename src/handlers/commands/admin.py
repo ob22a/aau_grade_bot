@@ -30,7 +30,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
     async def begin_broadcast(message: Message, state: FSMContext) -> None:
         await state.clear()
         await state.set_state(AdminBroadcastFSM.message)
-        await message.answer("Send the broadcast text.\n\n*(Send /cancel to abort)*", parse_mode="Markdown")
+        await message.answer("Send the broadcast text.\n\n<i>(Send /cancel to abort)</i>", parse_mode="HTML")
 
     @router.message(AdminBroadcastFSM.message)
     async def capture_broadcast(message: Message, state: FSMContext) -> None:

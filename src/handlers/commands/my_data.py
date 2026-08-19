@@ -28,14 +28,7 @@ def build_my_data_router(services: ApplicationServices) -> Router:
     async def cmd_my_data(message: Message, state: FSMContext, user_id: int = None) -> None:
         target_id = user_id or message.from_user.id
         
-        # We need to fetch the user to get their details
-        import asyncio
-        from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
-        
-        user_obj = None
-        if services.lifecycle.session_factory is not None:
-            async with SqlAlchemyRepositoryUnitOfWork(services.lifecycle.session_factory) as uow:
-                user_obj = await uow.users.get_by_telegram_id(target_id)
+        user_obj = await services.lifecycle.get_user_profile(target_id)
         
         if not user_obj:
             if not user_id:

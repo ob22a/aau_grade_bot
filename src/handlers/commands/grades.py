@@ -122,7 +122,7 @@ def build_grades_router(services: ApplicationServices) -> Router:
                 await query.message.edit_text("No grades found for this selection.", reply_markup=kb)
             else:
                 kb = build_grades_keyboard(year, semester, result.report)
-                await query.message.edit_text(result.message, parse_mode="Markdown", reply_markup=kb)
+                await query.message.edit_text(result.message, parse_mode="HTML", reply_markup=kb)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
@@ -181,9 +181,11 @@ def build_grades_router(services: ApplicationServices) -> Router:
         try:
             result = await services.grades.read(request)
             kb = build_grades_keyboard(year, semester, result.report)
-            await query.message.edit_text(result.message, parse_mode="Markdown", reply_markup=kb)
+            await query.message.edit_text(result.message, parse_mode="HTML", reply_markup=kb)
             await query.answer("Grades refreshed!")
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
             await query.message.edit_text("❌ An error occurred while retrieving your grades. Please try again later.")
+
+    return router

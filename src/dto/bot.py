@@ -61,6 +61,15 @@ class AccountDeletionRequest:
 
 
 @dataclass(frozen=True)
+class UserProfileDTO:
+    telegram_id: int
+    university_id: str
+    department_id: str | None
+    section: str | None
+    campus: str | None = None
+
+
+@dataclass(frozen=True)
 class MetricsSnapshot:
     uptime_seconds: int
     scrape_attempts: int = 0
