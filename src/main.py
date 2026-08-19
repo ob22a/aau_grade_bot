@@ -28,7 +28,7 @@ async def main():
     dp = build_dispatcher(settings, services)
     
     # 3. Build Web App
-    app = build_http_app(settings)
+    app = build_http_app(settings, services)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', settings.port)

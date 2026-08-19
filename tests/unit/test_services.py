@@ -262,7 +262,7 @@ async def _scheduler_round_trip() -> None:
     service = SchedulerService(lock=lock)
     result = await service.run_once()
 
-    assert result.skipped is False
+    assert result.message == "No DB"
     assert lock.acquired_keys == ["cron:run"]
     assert lock.released_keys == ["cron:run"]
 

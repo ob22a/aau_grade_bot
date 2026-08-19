@@ -33,7 +33,7 @@ from services.scheduler.service import SchedulerService
 from services.scraper.service import ScraperService
 
 
-def build_http_app(settings: Settings) -> web.Application:
+def build_http_app(settings: Settings, services: ApplicationServices | None = None) -> web.Application:
     app = web.Application()
 
     async def health(_request: web.Request) -> web.Response:
@@ -51,6 +51,11 @@ def build_http_app(settings: Settings) -> web.Application:
             provided = _request.headers.get("X-Cron-Secret", "")
             if not hmac.compare_digest(provided, settings.cron_secret):
                 return web.Response(status=401)
+                
+        if services and hasattr(services, 'scheduler'):
+            import asyncio
+            asyncio.create_task(services.scheduler.run_once())
+            
         return web.json_response({"status": "accepted"})
 
     app.router.add_get("/", health)
