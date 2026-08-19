@@ -85,27 +85,49 @@ class GradeReadService:
             reports_list = list(reports)
 
         pages = []
+        def roman_to_int(s: str) -> int:
+            mapping = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6}
+            return mapping.get(s, 0)
+            
+        def extract_year_num(s: str) -> int | None:
+            s = s.lower().replace("year", "").replace(":", "").strip()
+            if s.isdigit():
+                return int(s)
+            num = roman_to_int(s)
+            if num > 0:
+                return num
+            return None
+
         filtered_reports = []
         for rep in reports_list:
             rep_year = getattr(rep, "year_label", "N/A")
             rep_sem = getattr(rep, "semester_label", "N/A")
             
-            if year_filter and year_filter != "All":
-                # Ensure year matches (e.g. "Year 1" matches "Year : 1" or "Year 1")
-                # User's year_filter might be "Year 1", so we can just check if "1" is in both
-                import re
-                yf_match = re.search(r'\d+', year_filter)
-                ry_match = re.search(r'\d+', rep_year)
-                if yf_match and ry_match and yf_match.group() != ry_match.group():
+            if year_filter and year_filter != "All" and year_filter != "All Years":
+                yf_num = extract_year_num(year_filter)
+                ry_num = extract_year_num(rep_year)
+                # If we could parse both and they differ, skip this report.
+                # If we couldn't parse one of them, we conservatively include it so user doesn't miss grades.
+                if yf_num is not None and ry_num is not None and yf_num != ry_num:
                     continue
             
-            if semester_filter and semester_filter != "All":
-                # Ensure semester matches
-                sf_lower = semester_filter.lower()
-                rf_lower = rep_sem.lower()
-                if "one" in sf_lower and "one" not in rf_lower and "1" not in rf_lower and "i" not in rf_lower:
+            if semester_filter and semester_filter != "All" and semester_filter != "All Semesters":
+                sf_lower = semester_filter.lower().replace("semester", "").strip()
+                rf_lower = rep_sem.lower().replace("semester", "").strip()
+                
+                is_sf_one = "one" in sf_lower or "1" in sf_lower or "i" in sf_lower.split()
+                is_sf_two = "two" in sf_lower or "2" in sf_lower or "ii" in sf_lower.split()
+                is_sf_three = "three" in sf_lower or "3" in sf_lower or "iii" in sf_lower.split()
+                
+                is_rf_one = "one" in rf_lower or "1" in rf_lower or "i" in rf_lower.split()
+                is_rf_two = "two" in rf_lower or "2" in rf_lower or "ii" in rf_lower.split()
+                is_rf_three = "three" in rf_lower or "3" in rf_lower or "iii" in rf_lower.split()
+                
+                if is_sf_one and not is_rf_one:
                     continue
-                if "two" in sf_lower and "two" not in rf_lower and "2" not in rf_lower and "ii" not in rf_lower:
+                if is_sf_two and not is_rf_two:
+                    continue
+                if is_sf_three and not is_rf_three:
                     continue
                     
             filtered_reports.append(rep)

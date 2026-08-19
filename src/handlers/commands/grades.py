@@ -49,17 +49,25 @@ def build_semester_keyboard(year: str) -> InlineKeyboardMarkup:
         ]
     )
 
-def build_grades_keyboard(year: str, semester: str, report: Any | None = None) -> InlineKeyboardMarkup:
+def build_grades_keyboard(year: str, semester: str, report: Any | None = None, current_page: int = 0, total_pages: int = 1) -> InlineKeyboardMarkup:
     buttons = []
 
     if report is not None:
-        for idx, cg in enumerate(report.course_grades):
+        for idx, cg in enumerate(getattr(report, "course_grades", [])):
             buttons.append([
                 InlineKeyboardButton(
                     text=f"📊 {cg.course_code}",
                     callback_data=f"grade_c:{year}:{semester}:{idx}"
                 )
             ])
+
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Previous", callback_data=f"grade_p:{year}:{semester}:{current_page-1}"))
+    if current_page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Next ➡️", callback_data=f"grade_p:{year}:{semester}:{current_page+1}"))
+    if nav_buttons:
+        buttons.append(nav_buttons)
 
     buttons.append([
         InlineKeyboardButton(text="🔄 Force Refresh", callback_data=f"grade_r:{year}:{semester}")
@@ -121,13 +129,32 @@ def build_grades_router(services: ApplicationServices) -> Router:
                 kb = build_grades_keyboard(year, semester, None)
                 await query.message.edit_text("No grades found for this selection.", reply_markup=kb)
             else:
-                kb = build_grades_keyboard(year, semester, result.report)
+                kb = build_grades_keyboard(year, semester, result.report, result.current_page, result.total_pages)
                 await query.message.edit_text(result.message, parse_mode="HTML", reply_markup=kb)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
             if query.message:
                 await query.message.edit_text("❌ An error occurred while retrieving your grades. Please try again later.")
+        await query.answer()
+
+    @router.callback_query(F.data.startswith("grade_p:"))
+    async def paginate_grades(query: CallbackQuery) -> None:
+        parts = query.data.split(":")
+        year = parts[1]
+        semester = parts[2]
+        page_index = int(parts[3])
+        
+        user_id = query.from_user.id
+        request = GradeReadRequest(telegram_id=user_id, year_filter=year, semester_filter=semester, page_index=page_index)
+        
+        try:
+            result = await services.grades.read(request)
+            kb = build_grades_keyboard(year, semester, result.report, result.current_page, result.total_pages)
+            if query.message:
+                await query.message.edit_text(result.message, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            await query.answer("Failed to load page.", show_alert=True)
         await query.answer()
 
     @router.callback_query(F.data.startswith("grade_c:"))
@@ -180,7 +207,7 @@ def build_grades_router(services: ApplicationServices) -> Router:
         
         try:
             result = await services.grades.read(request)
-            kb = build_grades_keyboard(year, semester, result.report)
+            kb = build_grades_keyboard(year, semester, result.report, result.current_page, result.total_pages)
             await query.message.edit_text(result.message, parse_mode="HTML", reply_markup=kb)
             await query.answer("Grades refreshed!")
         except Exception as exc:

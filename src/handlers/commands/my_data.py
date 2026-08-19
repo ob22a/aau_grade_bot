@@ -22,10 +22,11 @@ def build_my_data_router(services: ApplicationServices) -> Router:
     @router.callback_query(F.data == "my_data")
     async def cb_my_data(callback_query: CallbackQuery, state: FSMContext) -> None:
         await callback_query.answer()
-        await cmd_my_data(callback_query.message, state, callback_query.from_user.id)
+        await show_my_data_logic(callback_query.message, services, user_id=callback_query.from_user.id)
 
     @router.message(Command("my_data"))
     async def cmd_my_data(message: Message, state: FSMContext, user_id: int = None) -> None:
+        await show_my_data_logic(message, services, user_id)
         target_id = user_id or message.from_user.id
         
         user_obj = await services.lifecycle.get_user_profile(target_id)
@@ -62,7 +63,7 @@ def build_my_data_router(services: ApplicationServices) -> Router:
     @router.callback_query(F.data == "open_my_data")
     async def cb_open_my_data(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
-        await cmd_my_data(callback.message, state, user_id=callback.from_user.id)
+        await show_my_data_logic(callback.message, services, user_id=callback.from_user.id)
 
     @router.callback_query(F.data == "change_uni_id")
     async def cb_change_uni_id(callback: CallbackQuery, state: FSMContext) -> None:
@@ -81,7 +82,7 @@ def build_my_data_router(services: ApplicationServices) -> Router:
             await message.answer("❌ Failed to update University ID.")
         
         await state.clear()
-        await cmd_my_data(message, state)
+        await show_my_data_logic(message, services)
 
     @router.callback_query(F.data == "change_password")
     async def cb_change_password(callback: CallbackQuery, state: FSMContext) -> None:
@@ -108,7 +109,7 @@ def build_my_data_router(services: ApplicationServices) -> Router:
         else:
             await message.answer("❌ Failed to update password. You may need to /register first.")
         await state.clear()
-        await cmd_my_data(message, state)
+        await show_my_data_logic(message, services)
 
     @router.callback_query(F.data == "change_department")
     async def cb_change_department(callback: CallbackQuery, state: FSMContext) -> None:
@@ -127,6 +128,43 @@ def build_my_data_router(services: ApplicationServices) -> Router:
             await message.answer("❌ Failed to update Department.")
         
         await state.clear()
-        await cmd_my_data(message, state)
+        await show_my_data_logic(message, services)
 
     return router
+
+async def show_my_data_logic(message: Message, services: ApplicationServices, user_id: int = None) -> None:
+    target_id = user_id or message.from_user.id
+    
+    user_obj = await services.lifecycle.get_user_profile(target_id)
+    
+    if not user_obj:
+        if not user_id:
+            await message.answer("You are not registered. Use /register to begin.")
+        return
+
+    password = await services.lifecycle.get_decrypted_password(target_id, services.registration.cipher)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🆔 Change University ID", callback_data="change_uni_id")],
+        [InlineKeyboardButton(text="🔄 Change Password", callback_data="change_password")],
+        [InlineKeyboardButton(text="🏫 Change Department", callback_data="change_department")],
+        [InlineKeyboardButton(text="🔄 Change Section", callback_data="change_section")],
+        [InlineKeyboardButton(text="🎓 View Grades", callback_data="view_grades")]
+    ])
+    
+    text = (
+        f"👤 <b>Your Data</b>\n\n"
+        f"University ID: <tg-spoiler>{html.escape(user_obj.university_id)}</tg-spoiler>\n"
+        f"Password: <tg-spoiler>{html.escape(password or '********')}</tg-spoiler>\n"
+        f"Department: <code>{html.escape(user_obj.department_id or 'Unknown')}</code>\n"
+        f"Campus: <code>{html.escape(user_obj.campus or 'Unknown')}</code>\n"
+        f"Section: <code>{html.escape(user_obj.section or 'Unknown')}</code>\n"
+    )
+
+    if user_id:
+        try:
+            await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            await message.answer(text, reply_markup=kb, parse_mode="HTML")
+    else:
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")

@@ -304,6 +304,8 @@ def build_registration_router(services: ApplicationServices) -> Router:
             await state.clear()
             if query.message:
                 await query.message.answer(outcome.result.message, parse_mode="HTML")
+                from handlers.commands.my_data import show_my_data_logic
+                await show_my_data_logic(query.message, services, user_id=query.from_user.id)
         except PortalAuthenticationError:
             await state.clear()
             if query.message:
