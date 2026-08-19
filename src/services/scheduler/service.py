@@ -18,10 +18,19 @@ class SchedulerRunResult:
 class SchedulerService:
     """Manage atomic cron runs and cohort scan sequencing."""
 
-    def __init__(self, lock: Any | None = None, notification_service: Any | None = None, portal_client: Any | None = None) -> None:
+    def __init__(
+        self,
+        lock: Any | None = None,
+        notification_service: Any | None = None,
+        portal_client: Any | None = None,
+        session_factory: Any | None = None,
+        cipher: Any | None = None,
+    ) -> None:
         self.lock = lock
         self.notification_service = notification_service
         self.portal_client = portal_client
+        self.session_factory = session_factory
+        self.cipher = cipher
 
     async def run_once(self) -> SchedulerRunResult:
         started_at = datetime.now(timezone.utc)
