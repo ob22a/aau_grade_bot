@@ -37,6 +37,12 @@ class DummyCache:
     async def set(self, key: str, value: str, ttl_seconds: int | None = None) -> None:
         self.set_calls.append((key, value, ttl_seconds))
 
+    async def acquire_lock(self, key: str, ttl_seconds: int = 30) -> bool:
+        return True
+
+    async def release_lock(self, key: str) -> None:
+        pass
+
 
 @dataclass
 class DummyListRepo:

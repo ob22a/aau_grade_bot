@@ -29,3 +29,40 @@ class InMemoryCache:
     async def delete(self, key: str) -> None:
         if key in self._store:
             del self._store[key]
+
+    async def acquire_lock(self, key: str, ttl_seconds: int = 30) -> bool:
+        if key in self._store:
+            _, expires_at = self._store[key]
+            if expires_at is None or time.time() < expires_at:
+                return False
+        # Acquire
+        self._store[key] = ("1", time.time() + ttl_seconds)
+        return True
+
+    async def release_lock(self, key: str) -> None:
+        await self.delete(key)
+
+class RedisCache:
+    """Redis-backed cache adapter."""
+
+    def __init__(self, url: str) -> None:
+        import redis.asyncio as redis
+        self.redis = redis.from_url(url, decode_responses=True)
+
+    async def get(self, key: str) -> str | None:
+        return await self.redis.get(key)
+
+    async def set(self, key: str, value: str, ttl_seconds: int | None = None) -> None:
+        if ttl_seconds is not None:
+            await self.redis.setex(key, ttl_seconds, value)
+        else:
+            await self.redis.set(key, value)
+
+    async def delete(self, key: str) -> None:
+        await self.redis.delete(key)
+
+    async def acquire_lock(self, key: str, ttl_seconds: int = 30) -> bool:
+        return await self.redis.set(key, "1", nx=True, ex=ttl_seconds)
+
+    async def release_lock(self, key: str) -> None:
+        await self.redis.delete(key)

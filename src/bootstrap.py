@@ -72,8 +72,12 @@ def build_application_services(
     cipher = AesGcmCipher.from_base64_key(settings.encryption_key)
     sender = AiogramTelegramNotificationSender(bot, settings.admins_telegram_id) if bot is not None else None
     
-    # We use a single shared cache instance for the application
-    cache = InMemoryCache()
+    # Initialize cache
+    if settings.redis_url:
+        from clients.cache_adapter import RedisCache
+        cache = RedisCache(settings.redis_url)
+    else:
+        cache = InMemoryCache()
 
     notification_service = NotificationService(sender)
 

@@ -215,8 +215,18 @@ class GradeReadService:
                                         total_pages=len(pages),
                                         report=rep
                                     )
-                        else:
                             # Force refresh from portal
+                            lock_key = f"lock:scrape:{request.telegram_id}"
+                            if self.cache is not None:
+                                if not await self.cache.acquire_lock(lock_key, ttl_seconds=60):
+                                    return GradeReadResult(
+                                        message="⏳ <b>Refresh in progress...</b>\nA grade refresh is already in progress. Please wait a moment for it to complete.",
+                                        cached=False,
+                                        current_page=0,
+                                        total_pages=1,
+                                        report=None
+                                    )
+                                    
                             cred = await uow.credentials.get_by_user_id(db_user.id)
                             if cred is not None and self.portal_client is not None:
                                 try:
@@ -280,6 +290,9 @@ class GradeReadService:
                                             snippet
                                         )
                                     logging.getLogger(__name__).warning(f"Portal scrape failed for user: {scrape_err}")
+                                finally:
+                                    if self.cache is not None:
+                                        await self.cache.release_lock(lock_key)
             except Exception as db_err:
                 import logging
                 logging.getLogger(__name__).warning(f"DB user query failed: {db_err}")
