@@ -16,6 +16,9 @@ import time
 
 import pytest
 
+from contextlib import asynccontextmanager
+from typing import Any
+from unittest.mock import patch
 from crypto.cipher import AesGcmCipher
 from dto.bot import GradeReadRequest
 from services.grades.service import GradeReadService
@@ -118,31 +121,85 @@ def test_scenario_b_pagination_under_load() -> None:
     """50 users rapidly paginating through grade pages concurrently."""
 
     async def scenario() -> None:
-        cache = MockCache()
-        # Each user has 5 pages
-        for i in range(50):
-            pages = [f"Page {p} for user {i}" for p in range(5)]
-            await cache.set(f"grades:{30000 + i}", json.dumps(pages))
+        class DummySession:
+            def __init__(self, data):
+                self.data = data
+            async def execute(self, stmt):
+                from types import SimpleNamespace
+                class DummyResult:
+                    def __init__(self, d): self.d = d
+                    def scalars(self): return self
+                    def first(self): return self.d
+                    def all(self): return [self.d] if self.d else []
+                user = SimpleNamespace(id="u1", telegram_id=30000, university_id="UGR", semester_results=self.data)
+                return DummyResult(user)
+            async def scalars(self, stmt):
+                return self.data
+            async def scalar_one_or_none(self, stmt):
+                from types import SimpleNamespace
+                return SimpleNamespace(id="u1", telegram_id=30000, university_id="UGR", semester_results=self.data)
+            async def commit(self): pass
+            async def rollback(self): pass
+            async def close(self): pass
 
-        service = GradeReadService(cache=cache)
-        metrics = StressMetrics()
-        metrics.start_time = time.perf_counter()
+        class DummyUOW:
+            def __init__(self, data):
+                self.session = DummySession(data)
+                self.users = self
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def get_by_telegram_id(self, tid):
+                from types import SimpleNamespace
+                return SimpleNamespace(id="u1", telegram_id=tid, university_id="UGR", semester_results=self.session.data)
 
-        async def paginate(user_idx: int) -> None:
-            telegram_id = 30000 + user_idx
-            for page in range(5):
-                request = GradeReadRequest(telegram_id=telegram_id, page_index=page)
-                t0 = time.perf_counter()
-                try:
-                    result = await service.read(request)
-                    metrics.record_latency(time.perf_counter() - t0)
-                    assert result.current_page == page
-                    assert result.total_pages == 5
-                except Exception as exc:
-                    metrics.record_error(exc)
+        from crypto.cipher import AesGcmCipher, Ciphertext
+        import base64
+        cipher = AesGcmCipher.from_base64_key(AesGcmCipher.generate_key())
+        
+        from parser.models import GradeReport, CourseGrade, AssessmentReference, GradeReportSummary
+        # Generate 5 reports for 5 pages
+        reports = []
+        for p in range(5):
+            rep = GradeReport(
+                academic_year=f"202{p}/202{p+1}",
+                year_label="Year I",
+                semester_label="Semester I",
+                course_grades=(
+                    CourseGrade(
+                        course_number=1, course_name=f"Course {p}", course_code=f"C-{p}",
+                        credit_hours=3.0, ects=5.0, grade="A",
+                        assessment=AssessmentReference(academic_year_id="1", semester_id="1", course_id="1")
+                    ),
+                ),
+                summary=GradeReportSummary(sgp=12.0, sgpa=4.0, cgp=12.0, cgpa=4.0, academic_status="Pass")
+            )
+            from types import SimpleNamespace
+            enc_data = cipher.encrypt(rep.model_dump_json())
+            reports.append(SimpleNamespace(encrypted_result_detail=enc_data))
 
-        tasks = [paginate(i) for i in range(50)]
-        await asyncio.gather(*tasks)
+        def uow_factory():
+            return DummyUOW(reports)
+
+        with patch("repositories.sqlalchemy.unit_of_work.SqlAlchemyRepositoryUnitOfWork", side_effect=lambda f: uow_factory()):
+            service = GradeReadService(session_factory=lambda: None, cipher=cipher)
+            metrics = StressMetrics()
+            metrics.start_time = time.perf_counter()
+    
+            async def paginate(user_idx: int) -> None:
+                telegram_id = 30000 + user_idx
+                for page in range(5):
+                    request = GradeReadRequest(telegram_id=telegram_id, page_index=page)
+                    t0 = time.perf_counter()
+                    try:
+                        result = await service.read(request)
+                        metrics.record_latency(time.perf_counter() - t0)
+                        assert result.current_page == page
+                        assert result.total_pages == 5
+                    except Exception as exc:
+                        metrics.record_error(exc)
+    
+            tasks = [paginate(i) for i in range(50)]
+            await asyncio.gather(*tasks)
         metrics.end_time = time.perf_counter()
 
         print(metrics.summary("Scenario B: 50 Users × 5 Pages Pagination"))

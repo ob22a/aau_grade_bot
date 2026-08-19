@@ -102,7 +102,7 @@ class GradeReadService:
         filtered_reports = []
         for rep in reports_list:
             rep_year = getattr(rep, "year_label", "N/A")
-            rep_sem = getattr(rep, "semester_label", "N/A")
+            rep_sem = getattr(rep, "semester", "N/A")
             
             if year_filter and year_filter != "All" and year_filter != "All Years":
                 yf_num = extract_year_num(year_filter)

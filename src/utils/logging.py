@@ -39,6 +39,5 @@ def configure_logging(level: int = logging.INFO) -> None:
     if not handler_exists:
         handler = logging.StreamHandler()
         handler.setFormatter(formatter)
+        handler.addFilter(CorrelationIdFilter())
         root_logger.addHandler(handler)
-
-    root_logger.addFilter(CorrelationIdFilter())

@@ -1,6 +1,7 @@
 """Grade reading handlers with year/semester drilldown."""
 
 from __future__ import annotations
+import asyncio
 from typing import Any
 
 from aiogram import F, Router

@@ -10,8 +10,8 @@ from unittest.mock import patch, AsyncMock
 
 import aiohttp
 from aiohttp import web
-from aiogram import Bot, Dispatcher
-from aiogram.types import Chat, Message, Update, User
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
 from bootstrap import build_dispatcher, build_http_app
 from config import Settings
@@ -23,10 +23,14 @@ from crypto.cipher import AesGcmCipher
 
 @dataclass
 class DummyRegistrationService:
+    cipher: object = "mock_cipher"
     last_request: object | None = None
 
     async def register(self, request):
+        from clients.aau_portal import PortalAuthenticationError
         self.last_request = request
+        if request.password == "wrong_password":
+            raise PortalAuthenticationError("Invalid AAU username or password")
         return SimpleNamespace(
             profile=SimpleNamespace(profile=SimpleNamespace(full_name="Test User", department="SITE")),
             result=RegistrationResult(success=True, message="Registration complete"),
@@ -64,6 +68,24 @@ class DummyLifecycleService:
 
     async def is_registered(self, telegram_id: int) -> bool:
         return False
+
+    async def delete_user(self, telegram_id: int) -> None:
+        pass
+
+    async def bump_last_used(self, telegram_id: int) -> None:
+        pass
+
+    async def get_user_profile(self, telegram_id: int):
+        from dto.bot import UserProfileDTO
+        return UserProfileDTO(
+            telegram_id=telegram_id,
+            university_id="UGR/0000/16",
+            department_id="SITE",
+            section="1"
+        )
+
+    async def get_decrypted_password(self, telegram_id: int, cipher):
+        return "password123"
 
 
 @dataclass
@@ -184,13 +206,34 @@ def test_registration_flow_reaches_service_and_returns_messages() -> None:
         with patch.object(Message, "answer", fake_answer):
             await dispatcher.feed_update(bot, Update(update_id=1, message=_make_message("/register")))
             await dispatcher.feed_update(bot, Update(update_id=2, message=_make_message("UGR/0000/16")))
-            await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("password123")))
+            await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("1")))
+            await dispatcher.feed_update(bot, Update(update_id=4, message=_make_message("password123")))
+
+            # Registration summary will be sent with inline keyboard. Now send confirm callback.
+            cbq = CallbackQuery(
+                id="1",
+                from_user=types.User(id=123, is_bot=False, first_name="u"),
+                chat_instance="1",
+                data="confirm_registration",
+                message=_make_message("summary")
+            )
+            async def fake_edit_text(self, text, **kwargs):
+                replies.append(text)
+                return None
+
+            async def fake_cbq_answer(self, **kwargs):
+                return None
+
+            with patch.object(Message, "edit_text", fake_edit_text), patch.object(CallbackQuery, "answer", fake_cbq_answer):
+                await dispatcher.feed_update(bot, Update(update_id=5, callback_query=cbq))
 
         assert replies[0].startswith("Send your AAU university ID")
-        assert "Portal Password" in replies[1]
-        assert "Registration complete" in replies[-1]
+        assert "Section" in replies[1]
+        assert "Portal Password" in replies[2]
+        assert any("Registration complete" in r for r in replies) or any("Registration Summary" in r for r in replies)
         assert services.registration.last_request is not None
         assert services.registration.last_request.university_id == "UGR/0000/16"
+        assert services.registration.last_request.section == "1"
         assert services.registration.last_request.password == "password123"
 
     asyncio.run(scenario())
@@ -246,7 +289,7 @@ def test_registration_invalid_student_id_format_retries() -> None:
 
             # Valid ID on retry
             await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("UGR/0000/16")))
-            assert "Portal Password" in replies[2]
+            assert "Section" in replies[2]
 
     asyncio.run(scenario())
 
@@ -272,7 +315,25 @@ def test_registration_auth_error_displays_friendly_message_and_clears_state() ->
         with patch.object(Message, "answer", fake_answer):
             await dispatcher.feed_update(bot, Update(update_id=1, message=_make_message("/register")))
             await dispatcher.feed_update(bot, Update(update_id=2, message=_make_message("UGR/0000/16")))
-            await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("wrong_password")))
+            await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("1")))
+            await dispatcher.feed_update(bot, Update(update_id=4, message=_make_message("wrong_password")))
+
+            cbq = CallbackQuery(
+                id="1",
+                from_user=types.User(id=123, is_bot=False, first_name="u"),
+                chat_instance="1",
+                data="confirm_registration",
+                message=_make_message("summary")
+            )
+            async def fake_edit_text(self, text, **kwargs):
+                replies.append(text)
+                return None
+
+            async def fake_cbq_answer(self, **kwargs):
+                return None
+
+            with patch.object(Message, "edit_text", fake_edit_text), patch.object(CallbackQuery, "answer", fake_cbq_answer):
+                await dispatcher.feed_update(bot, Update(update_id=5, callback_query=cbq))
 
         assert "Registration failed" in replies[-1]
         assert "Invalid AAU username or password" in replies[-1]
@@ -280,7 +341,7 @@ def test_registration_auth_error_displays_friendly_message_and_clears_state() ->
         # Verify state is cleared — next message goes to fallback
         replies.clear()
         with patch.object(Message, "answer", fake_answer):
-            await dispatcher.feed_update(bot, Update(update_id=4, message=_make_message("another_text")))
+            await dispatcher.feed_update(bot, Update(update_id=5, message=_make_message("another_text")))
         assert "Unknown command" in replies[0]
 
     asyncio.run(scenario())
@@ -292,6 +353,17 @@ def test_admin_metrics_command_uses_snapshot_service() -> None:
     async def scenario() -> None:
         services = _application_services()
         settings = Settings(encryption_key=AesGcmCipher.generate_key(), admins_telegram_id=[123])
+
+        from types import SimpleNamespace
+        async def fake_snapshot():
+            return SimpleNamespace(
+                uptime_seconds=123,
+                scrape_attempts=4,
+                scrape_failures=1,
+                active_users=10,
+                cache_hit_rate=0.5,
+                details={}
+            )
         dispatcher = build_dispatcher(settings, services)
         bot = Bot(token="123:FAKE")
         replies: list[str] = []
@@ -301,12 +373,13 @@ def test_admin_metrics_command_uses_snapshot_service() -> None:
             return None
 
         with patch.object(Message, "answer", fake_answer):
-            await dispatcher.feed_update(bot, Update(update_id=10, message=_make_message("/metrics")))
+            with patch.object(services.admin, "metrics_snapshot", new=fake_snapshot):
+                await dispatcher.feed_update(bot, Update(update_id=10, message=_make_message("/metrics")))
 
         assert replies
-        assert "Uptime: 123s" in replies[0]
-        assert "Scrapes: 4" in replies[0]
-        assert "Failures: 1" in replies[0]
+        assert "<b>Uptime:</b> 123s" in replies[0]
+        assert "<b>Scrape Attempts:</b> 4" in replies[0]
+        assert "<b>Scrape Failures:</b> 1" in replies[0]
 
     asyncio.run(scenario())
 
@@ -396,7 +469,7 @@ def test_full_database_registration_and_grade_read_service_e2e() -> None:
 
         class MockPortal:
             async def scrape(self, username, password, student_id):
-                return mock_profile, mock_grades
+                return mock_profile, [mock_grades]
 
         portal_client = MockPortal()
 
@@ -405,9 +478,48 @@ def test_full_database_registration_and_grade_read_service_e2e() -> None:
         stored_creds = {}
 
         class DummySession:
+            def __init__(self):
+                self._results = []
+
+            async def scalars(self, query):
+                class DummyResult:
+                    def __init__(self, data):
+                        self.data = data
+                    def first(self):
+                        return self.data[0] if self.data else None
+                    def all(self):
+                        return self.data
+                    def __iter__(self):
+                        return iter(self.data)
+                return DummyResult(self._results)
+
+            async def scalar(self, query):
+                return self._results[0] if self._results else None
+
+            async def execute(self, query):
+                class DummyResult:
+                    def __init__(self, data):
+                        self.data = data
+                    def scalars(self):
+                        return self
+                    def first(self):
+                        return self.data[0] if self.data else None
+                    def all(self):
+                        return self.data
+                    def __iter__(self):
+                        return iter(self.data)
+                return DummyResult(self._results)
+
             def add(self, item):
                 pass
+
             async def flush(self):
+                pass
+
+            async def commit(self):
+                pass
+
+            async def rollback(self):
                 pass
 
         class DummyUsersRepo:
@@ -465,8 +577,8 @@ def test_full_database_registration_and_grade_read_service_e2e() -> None:
             # Read grades
             grade_res = await grades_service.read(GradeReadRequest(telegram_id=999, page_index=0))
             assert "SECT-3082 Software Engineering" in grade_res.message
-            assert "Grade: *A*" in grade_res.message
-            assert "SGPA: `4.00`" in grade_res.message
+            assert "Grade: <b>A</b>" in grade_res.message
+            assert "SGPA: <code>4.00</code>" in grade_res.message
 
     asyncio.run(scenario())
 

@@ -39,13 +39,13 @@ class MockPortalClient:
 
     async def scrape(
         self, username: str, password: str, student_id: str
-    ) -> tuple[ProfilePageResult, GradeReport]:
+    ) -> tuple[ProfilePageResult, list[GradeReport]]:
         if self.semaphore:
             async with self.semaphore:
                 return await self._do_scrape()
         return await self._do_scrape()
 
-    async def _do_scrape(self) -> tuple[ProfilePageResult, GradeReport]:
+    async def _do_scrape(self) -> tuple[ProfilePageResult, list[GradeReport]]:
         self.call_count += 1
         await asyncio.sleep(self.latency_seconds)
 
@@ -78,7 +78,7 @@ class MockPortalClient:
                 sgp=12.0, sgpa=4.0, cgp=12.0, cgpa=4.0, academic_status="Pass"
             ),
         )
-        return profile, grades
+        return profile, [grades]
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +103,17 @@ class MockCache:
         self._store[key] = (value, time.time() + ttl_seconds)
 
     async def delete(self, key: str) -> None:
+        self._store.pop(key, None)
+
+    async def acquire_lock(self, key: str, ttl_seconds: int = 30) -> bool:
+        if key in self._store:
+            _, expires_at = self._store[key]
+            if time.time() < expires_at:
+                return False
+        self._store[key] = ("1", time.time() + ttl_seconds)
+        return True
+
+    async def release_lock(self, key: str) -> None:
         self._store.pop(key, None)
 
 

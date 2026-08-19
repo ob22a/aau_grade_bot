@@ -15,3 +15,4 @@ class ApplicationServices:
     lifecycle: Any
     notification: Any
     scraper: Any
+    session_factory: Any | None = None

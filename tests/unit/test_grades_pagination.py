@@ -38,10 +38,10 @@ def test_format_grade_report_page_with_assessments() -> None:
     )
 
     assert "SECT-3082 Software Engineering II" in formatted
-    assert "Credits: 3 | ECTS: 5 | Grade: *A*" in formatted
+    assert "Credits: 3 | ECTS: 5 | Grade: <b>A</b>" in formatted
     assert "Assessment Breakdown:" not in formatted
     assert "Total Mark:" not in formatted
-    assert "SGPA: `4.00` | CGPA: `3.92`" in formatted
+    assert "SGPA: <code>4.00</code> | CGPA: <code>3.92</code>" in formatted
 
 
 from parser.models import GradeReport, GradeReportSummary, CourseGrade, AssessmentReference

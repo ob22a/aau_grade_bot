@@ -117,6 +117,7 @@ def build_application_services(
         lifecycle=AccountLifecycleService(notifier=sender, session_factory=session_factory),
         notification=notification_service,
         scraper=ScraperService(portal_client),
+        session_factory=session_factory,
     )
 
 

@@ -93,18 +93,19 @@ def build_registration_router(services: ApplicationServices) -> Router:
         await state.update_data(university_id=normalized_id)
         
         # Fetch campuses
-        campuses = []
+        campuses_data = []
         if services.session_factory is not None:
             from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
             async with SqlAlchemyRepositoryUnitOfWork(services.session_factory) as uow:
                 campuses = await uow.campuses.get_all()
+                campuses_data = [{"id": c.campus_id, "name": c.full_name} for c in campuses]
         
         keyboard_buttons = []
-        for c in campuses:
-            keyboard_buttons.append([InlineKeyboardButton(text=c.full_name, callback_data=f"campus_{c.campus_id}")])
+        for c in campuses_data:
+            keyboard_buttons.append([InlineKeyboardButton(text=c["name"], callback_data=f"campus_{c['id']}")])
             
         # Add a skip button if needed, but user wants campus input. Let's make it mandatory if available.
-        if not campuses:
+        if not campuses_data:
             # Fallback to section if no campuses
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Skip Section", callback_data="skip_section")]])
             await state.set_state(RegistrationFSM.section)

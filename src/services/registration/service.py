@@ -191,7 +191,7 @@ class RegistrationService:
                             await uow.session.execute(delete(SemesterResult).where(SemesterResult.user_id == db_user.id))
 
                             for rep in _grade_report:
-                                sem = parse_semester(rep.semester_label)
+                                sem = parse_semester(rep.semester)
                             
                                 # Serialize GradeReport to JSON
                                 rep_dict = rep.model_dump()
