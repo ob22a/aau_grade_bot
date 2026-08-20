@@ -78,6 +78,9 @@ erDiagram
         varchar encrypted_password
         varchar iv
         varchar algorithm
+        boolean is_valid
+        int failed_attempts
+        timestamptz locked_until
         timestamptz updated_at
     }
 
@@ -98,7 +101,10 @@ hold login credentials.
 **`user_credentials`**  one-to-one with `users`, holds the encrypted
 university password used to scrape grades. Split into its own table
 deliberately, so credential access is a conscious, visible step in the code
-rather than something that comes bundled with every ordinary `User` lookup.
+and so we don't accidentally load or log passwords when doing routine user
+updates. Follows ADR 021 by tracking `is_valid`, `failed_attempts`, and `locked_until` 
+to safely pause scraping if a user's password changes, preventing the bot from locking 
+them out of their real university account.
 See [ADR 002](./decisions/002-user-credential-isolation.md).
 
 ---

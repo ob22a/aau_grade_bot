@@ -4,13 +4,13 @@ AAU Grade Bot is a Telegram-based grade tracker for AAU students. It logs in to 
 
 The repository is organized as a layered application:
 
-- `handlers/` translate Telegram and HTTP inputs into service calls.
-- `services/` orchestrate registration, grade reads, scheduler runs, admin actions, and account lifecycle work.
-- `repositories/` define persistence contracts and SQLAlchemy implementations.
-- `clients/` hold portal and Telegram adapters.
-- `parser/` contains safe HTML parsing for AAU pages.
-- `crypto/` encrypts sensitive data at rest.
-- `docs/` explains how the system works, why it is shaped that way, and how to run it.
+- [`handlers/`](../src/handlers) translate Telegram and HTTP inputs into service calls.
+- [`services/`](../src/services) orchestrate registration, grade reads, scheduler runs, admin actions, and account lifecycle work.
+- [`repositories/`](../src/repositories) define persistence contracts and SQLAlchemy implementations.
+- [`clients/`](../src/clients) hold portal and Telegram adapters.
+- [`parser/`](../src/parser) contains safe HTML parsing for AAU pages.
+- [`crypto/`](../src/crypto) encrypts sensitive data at rest.
+- [`docs/`](./) explains how the system works, why it is shaped that way, and how to run it.
 
 ## 🚀 Key Features
 
@@ -34,7 +34,7 @@ graph TD
     Cron((Background Cron)) -->|Scheduled Trigger| SchedulerService
 
     subgraph "Presentation Layer (aiogram)"
-        Handlers[Command Handlers & Middlewares]
+        Handlers["Command Handlers<br/>& Middlewares"]
     end
 
     subgraph "Application Services (Domain Logic)"
@@ -45,15 +45,15 @@ graph TD
     end
 
     subgraph "Ports (Interfaces)"
-        UoWPort(Unit of Work Port)
-        PortalPort(Portal Client Port)
+        UoWPort("Unit of Work Port")
+        PortalPort("Portal Client Port")
     end
 
     subgraph "Infrastructure Layer (Adapters)"
-        UoWAdapter[SQLAlchemy UnitOfWork]
-        PortalAdapter[Aiohttp Portal Scraper]
+        UoWAdapter["SQLAlchemy<br/>UnitOfWork"]
+        PortalAdapter["Aiohttp<br/>Portal Scraper"]
         DB[(PostgreSQL)]
-        Redis[(Redis Cache & Locks)]
+        Redis[("Redis Cache<br/>& Locks")]
     end
 
     Handlers --> RegistrationService
@@ -122,6 +122,9 @@ erDiagram
         int user_id FK
         bytes encrypted_password
         string iv
+        boolean is_valid
+        int failed_attempts
+        datetime locked_until
     }
     
     SEMESTER_RESULT {
