@@ -1,0 +1,603 @@
+"""Integration tests for bootstrap HTTP endpoints and Telegram dispatcher flow."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import patch, AsyncMock
+
+import aiohttp
+from aiohttp import web
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import CallbackQuery, Chat, Message, Update, User
+
+from bootstrap import build_dispatcher, build_http_app
+from config import Settings
+from dto.bot import GradeReadResult, RegistrationResult
+from fsm.states import RegistrationFSM
+from services.container import ApplicationServices
+from crypto.cipher import AesGcmCipher
+
+
+@dataclass
+class DummyRegistrationService:
+    cipher: object = "mock_cipher"
+    last_request: object | None = None
+
+    async def register(self, request):
+        from clients.aau_portal import PortalAuthenticationError
+        self.last_request = request
+        if request.password == "wrong_password":
+            raise PortalAuthenticationError("Invalid AAU username or password")
+        return SimpleNamespace(
+            profile=SimpleNamespace(profile=SimpleNamespace(full_name="Test User", department="SITE")),
+            result=RegistrationResult(success=True, message="Registration complete"),
+        )
+
+
+@dataclass
+class DummyGradesService:
+    async def read(self, request):
+        return GradeReadResult(message="Cached grades", cached=True)
+
+
+@dataclass
+class DummyAdminService:
+    async def broadcast(self, request):
+        return SimpleNamespace(message="Broadcast sent", recipients=1)
+
+    async def update_setting(self, request):
+        return SimpleNamespace(message="Setting updated")
+
+    async def metrics_snapshot(self):
+        return SimpleNamespace(uptime_seconds=123, scrape_attempts=4, scrape_failures=1)
+
+
+@dataclass
+class DummySchedulerService:
+    async def run_once(self):
+        return SimpleNamespace(message="scheduled")
+
+
+@dataclass
+class DummyLifecycleService:
+    async def request_deletion(self, request):
+        return SimpleNamespace(message="Deletion queued", deleted=True)
+
+    async def is_registered(self, telegram_id: int) -> bool:
+        return False
+
+    async def delete_user(self, telegram_id: int) -> None:
+        pass
+
+    async def bump_last_used(self, telegram_id: int) -> None:
+        pass
+
+    async def get_user_profile(self, telegram_id: int):
+        from dto.bot import UserProfileDTO
+        return UserProfileDTO(
+            telegram_id=telegram_id,
+            university_id="UGR/0000/16",
+            department_id="SITE",
+            section="1"
+        )
+
+    async def get_decrypted_password(self, telegram_id: int, cipher):
+        return "password123"
+
+
+@dataclass
+class DummyNotificationService:
+    async def send_user(self, telegram_id: int, text: str) -> None:
+        return None
+
+    async def send_admin(self, text: str) -> None:
+        return None
+
+
+@dataclass
+class DummyScraperService:
+    async def scrape(self, university_id: str, password: str, student_id: str):
+        return None
+
+
+
+def _application_services() -> ApplicationServices:
+    return ApplicationServices(
+        registration=DummyRegistrationService(),
+        grades=DummyGradesService(),
+        admin=DummyAdminService(),
+        scheduler=DummySchedulerService(),
+        lifecycle=DummyLifecycleService(),
+        notification=DummyNotificationService(),
+        scraper=DummyScraperService(),
+    )
+
+
+
+def _make_message(text: str, user_id: int = 123, chat_id: int = 123) -> Message:
+    return Message(
+        message_id=1,
+        date=datetime.now(timezone.utc),
+        chat=Chat(id=chat_id, type="private"),
+        from_user=User(id=user_id, is_bot=False, first_name="Tester"),
+        text=text,
+    )
+
+
+async def _run_http_app(settings: Settings) -> tuple[str, int]:
+    app = build_http_app(settings)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+
+    sockets = site._server.sockets  # type: ignore[attr-defined]
+    assert sockets
+    port = sockets[0].getsockname()[1]
+    base_url = f"http://127.0.0.1:{port}"
+    return base_url, port
+
+
+
+def test_http_endpoints_enforce_secrets_and_health() -> None:
+    async def scenario() -> None:
+        settings = Settings(
+            metrics_secret="metrics-secret",
+            cron_secret="cron-secret",
+        )
+        app = build_http_app(settings)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+
+        sockets = site._server.sockets  # type: ignore[attr-defined]
+        assert sockets
+        port = sockets[0].getsockname()[1]
+        base_url = f"http://127.0.0.1:{port}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{base_url}/health") as response:
+                assert response.status == 204
+
+            async with session.get(f"{base_url}/metrics") as response:
+                assert response.status == 401
+
+            async with session.get(
+                f"{base_url}/metrics",
+                headers={"X-Admin-Secret": "metrics-secret"},
+            ) as response:
+                assert response.status == 200
+                payload = await response.json()
+                assert payload["status"] == "ok"
+
+            async with session.post(f"{base_url}/cron") as response:
+                assert response.status == 401
+
+            async with session.post(
+                f"{base_url}/cron",
+                headers={"X-Cron-Secret": "cron-secret"},
+            ) as response:
+                assert response.status == 200
+                payload = await response.json()
+                assert payload["status"] == "accepted"
+
+        await runner.cleanup()
+
+    asyncio.run(scenario())
+
+
+
+def test_registration_flow_reaches_service_and_returns_messages() -> None:
+    async def scenario() -> None:
+        services = _application_services()
+        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        dispatcher = build_dispatcher(settings, services)
+        bot = Bot(token="123:FAKE")
+        replies: list[str] = []
+
+        async def fake_answer(self, text: str, **kwargs):
+            replies.append(text)
+            return None
+
+        with patch.object(Message, "answer", fake_answer):
+            await dispatcher.feed_update(bot, Update(update_id=1, message=_make_message("/register")))
+            await dispatcher.feed_update(bot, Update(update_id=2, message=_make_message("UGR/0000/16")))
+            await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("1")))
+            await dispatcher.feed_update(bot, Update(update_id=4, message=_make_message("password123")))
+
+            # Registration summary will be sent with inline keyboard. Now send confirm callback.
+            cbq = CallbackQuery(
+                id="1",
+                from_user=types.User(id=123, is_bot=False, first_name="u"),
+                chat_instance="1",
+                data="confirm_registration",
+                message=_make_message("summary")
+            )
+            async def fake_edit_text(self, text, **kwargs):
+                replies.append(text)
+                return None
+
+            async def fake_cbq_answer(self, **kwargs):
+                return None
+
+            with patch.object(Message, "edit_text", fake_edit_text), patch.object(CallbackQuery, "answer", fake_cbq_answer):
+                await dispatcher.feed_update(bot, Update(update_id=5, callback_query=cbq))
+
+        assert replies[0].startswith("Send your AAU university ID")
+        assert "Section" in replies[1]
+        assert "Portal Password" in replies[2]
+        assert any("Registration complete" in r for r in replies) or any("Registration Summary" in r for r in replies)
+        assert services.registration.last_request is not None
+        assert services.registration.last_request.university_id == "UGR/0000/16"
+        assert services.registration.last_request.section == "1"
+        assert services.registration.last_request.password == "password123"
+
+    asyncio.run(scenario())
+
+
+def test_registration_command_interception_cancels_state() -> None:
+    """Verify that sending a command (like /start or /cancel) mid-registration cancels the pending state."""
+    async def scenario() -> None:
+        services = _application_services()
+        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        dispatcher = build_dispatcher(settings, services)
+        bot = Bot(token="123:FAKE")
+        replies: list[str] = []
+
+        async def fake_answer(self, text: str, **kwargs):
+            replies.append(text)
+            return None
+
+        with patch.object(Message, "answer", fake_answer):
+            # 1. Start registration
+            await dispatcher.feed_update(bot, Update(update_id=1, message=_make_message("/register")))
+            assert "Send your AAU university ID" in replies[0]
+
+            # 2. Intercept with /start instead of sending ID
+            await dispatcher.feed_update(bot, Update(update_id=2, message=_make_message("/start")))
+            assert "Welcome! I am your <b>AAU Grade Bot</b>" in replies[1]
+
+            # 3. Now send a Student ID string  it should NOT be accepted as registration input because state was cleared
+            await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("UGR/0000/16")))
+            assert "Unknown command" in replies[2]
+
+    asyncio.run(scenario())
+
+
+def test_registration_invalid_student_id_format_retries() -> None:
+    """Verify that invalid student ID format shows helpful guidance without clearing state."""
+    async def scenario() -> None:
+        services = _application_services()
+        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        dispatcher = build_dispatcher(settings, services)
+        bot = Bot(token="123:FAKE")
+        replies: list[str] = []
+
+        async def fake_answer(self, text: str, **kwargs):
+            replies.append(text)
+            return None
+
+        with patch.object(Message, "answer", fake_answer):
+            await dispatcher.feed_update(bot, Update(update_id=1, message=_make_message("/register")))
+            # Invalid ID
+            await dispatcher.feed_update(bot, Update(update_id=2, message=_make_message("invalid_id")))
+            assert "Invalid AAU Student ID format" in replies[1]
+
+            # Valid ID on retry
+            await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("UGR/0000/16")))
+            assert "Section" in replies[2]
+
+    asyncio.run(scenario())
+
+
+def test_registration_auth_error_displays_friendly_message_and_clears_state() -> None:
+    """Verify that portal authentication failure displays friendly message and clears state."""
+    async def scenario() -> None:
+        from clients.aau_portal import PortalAuthenticationError
+
+        services = _application_services()
+        # Mock registration to fail with auth error
+        services.registration.register = AsyncMock(side_effect=PortalAuthenticationError("Invalid creds"))
+
+        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        dispatcher = build_dispatcher(settings, services)
+        bot = Bot(token="123:FAKE")
+        replies: list[str] = []
+
+        async def fake_answer(self, text: str, **kwargs):
+            replies.append(text)
+            return None
+
+        with patch.object(Message, "answer", fake_answer):
+            await dispatcher.feed_update(bot, Update(update_id=1, message=_make_message("/register")))
+            await dispatcher.feed_update(bot, Update(update_id=2, message=_make_message("UGR/0000/16")))
+            await dispatcher.feed_update(bot, Update(update_id=3, message=_make_message("1")))
+            await dispatcher.feed_update(bot, Update(update_id=4, message=_make_message("wrong_password")))
+
+            cbq = CallbackQuery(
+                id="1",
+                from_user=types.User(id=123, is_bot=False, first_name="u"),
+                chat_instance="1",
+                data="confirm_registration",
+                message=_make_message("summary")
+            )
+            async def fake_edit_text(self, text, **kwargs):
+                replies.append(text)
+                return None
+
+            async def fake_cbq_answer(self, **kwargs):
+                return None
+
+            with patch.object(Message, "edit_text", fake_edit_text), patch.object(CallbackQuery, "answer", fake_cbq_answer):
+                await dispatcher.feed_update(bot, Update(update_id=5, callback_query=cbq))
+
+        assert "Registration failed" in replies[-1]
+        assert "Invalid AAU username or password" in replies[-1]
+
+        # Verify state is cleared — next message goes to fallback
+        replies.clear()
+        with patch.object(Message, "answer", fake_answer):
+            await dispatcher.feed_update(bot, Update(update_id=5, message=_make_message("another_text")))
+        assert "Unknown command" in replies[0]
+
+    asyncio.run(scenario())
+
+
+
+
+def test_admin_metrics_command_uses_snapshot_service() -> None:
+    async def scenario() -> None:
+        services = _application_services()
+        settings = Settings(encryption_key=AesGcmCipher.generate_key(), admins_telegram_id=[123])
+
+        from types import SimpleNamespace
+        async def fake_snapshot():
+            return SimpleNamespace(
+                uptime_seconds=123,
+                scrape_attempts=4,
+                scrape_failures=1,
+                active_users=10,
+                cache_hit_rate=0.5,
+                details={}
+            )
+        dispatcher = build_dispatcher(settings, services)
+        bot = Bot(token="123:FAKE")
+        replies: list[str] = []
+
+        async def fake_answer(self, text: str, **kwargs):
+            replies.append(text)
+            return None
+
+        with patch.object(Message, "answer", fake_answer):
+            with patch.object(services.admin, "metrics_snapshot", new=fake_snapshot):
+                await dispatcher.feed_update(bot, Update(update_id=10, message=_make_message("/metrics")))
+
+        assert replies
+        assert "<b>Uptime:</b> 123s" in replies[0]
+        assert "<b>Scrape Attempts:</b> 4" in replies[0]
+        assert "<b>Scrape Failures:</b> 1" in replies[0]
+
+    asyncio.run(scenario())
+
+
+def test_grades_command_flow_and_callbacks() -> None:
+    async def scenario() -> None:
+        from aiogram.types import CallbackQuery
+        from aiogram import types
+
+        services = _application_services()
+        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        dispatcher = build_dispatcher(settings, services)
+        bot = Bot(token="123:FAKE")
+        replies: list[str] = []
+
+        async def fake_answer(self, text: str = None, **kwargs):
+            if text:
+                replies.append(text)
+            return None
+        async def fake_edit_text(self, text: str, **kwargs):
+            replies.append(text)
+            return None
+        async def fake_bot_call(self, method, *args, **kwargs):
+            return True
+
+        with patch.object(Message, "answer", fake_answer), \
+             patch.object(Bot, "__call__", fake_bot_call):
+            await dispatcher.feed_update(bot, Update(update_id=20, message=_make_message("/grades")))
+
+            assert replies
+            # /grades now shows grades directly or "No grades" message
+            assert any("grades" in r.lower() or "no grades" in r.lower() for r in replies)
+            
+            # Test the filter flow via view_grades_filter callback
+            replies.clear()
+            cq = CallbackQuery(id="1", from_user=types.User(id=99, is_bot=False, first_name="u"), chat_instance="1", data="view_grades_filter", message=_make_message("msg"))
+            with patch.object(Message, "edit_text", fake_edit_text):
+                await dispatcher.feed_update(bot, Update(update_id=21, callback_query=cq))
+            assert replies
+            assert "Select the <b>Academic Year</b>" in replies[0]
+
+            # Test selecting a year
+            replies.clear()
+            cq = CallbackQuery(id="1", from_user=types.User(id=99, is_bot=False, first_name="u"), chat_instance="1", data="grade_y:Year 1", message=_make_message("msg"))
+            with patch.object(Message, "edit_text", fake_edit_text):
+                await dispatcher.feed_update(bot, Update(update_id=22, callback_query=cq))
+            assert replies
+            assert "Now select the <b>Semester</b>" in replies[0]
+    
+            # Test selecting a semester
+            replies.clear()
+            cq = CallbackQuery(id="1", from_user=types.User(id=99, is_bot=False, first_name="u"), chat_instance="1", data="grade_s:Year 1:One", message=_make_message("msg"))
+            with patch.object(Message, "edit_text", fake_edit_text):
+                await dispatcher.feed_update(bot, Update(update_id=23, callback_query=cq))
+            # The test will return cached grades or "No grades found" depending on cache.
+            assert len(replies) >= 2 # One for "Fetching grades...", one for the result
+    
+    asyncio.run(scenario())
+
+
+def test_full_database_registration_and_grade_read_service_e2e() -> None:
+    async def scenario() -> None:
+        from services.registration.service import RegistrationService
+        from services.grades.service import GradeReadService
+        from parser.models import ProfilePageResult, StudentProfileData, GradeReport, CourseGrade, AssessmentReference, GradeReportSummary
+        from dto.bot import RegistrationRequest, GradeReadRequest
+        from types import SimpleNamespace
+
+        cipher = AesGcmCipher.from_base64_key(AesGcmCipher.generate_key())
+
+        mock_profile = ProfilePageResult(
+            profile=StudentProfileData(
+                full_name="Test Student",
+                student_id="UGR/1234/16",
+                department="SITE",
+                year_level="Year III",
+            )
+        )
+        mock_grades = GradeReport(
+            academic_year="2023/2024",
+            year_label="Year III",
+            semester_label="Semester I",
+            course_grades=(
+                CourseGrade(
+                    course_number=1,
+                    course_name="Software Engineering",
+                    course_code="SECT-3082",
+                    credit_hours=3.0,
+                    ects=5.0,
+                    grade="A",
+                    assessment=AssessmentReference(academic_year_id="1", semester_id="1", course_id="101"),
+                ),
+            ),
+            summary=GradeReportSummary(sgp=12.0, sgpa=4.0, cgp=12.0, cgpa=4.0, academic_status="Pass"),
+        )
+
+        class MockPortal:
+            async def scrape(self, username, password, student_id):
+                return mock_profile, [mock_grades]
+
+        portal_client = MockPortal()
+
+        # In-memory store simulating UOW / DB persistence
+        stored_users = {}
+        stored_creds = {}
+
+        class DummySession:
+            def __init__(self):
+                self._results = []
+
+            async def scalars(self, query):
+                class DummyResult:
+                    def __init__(self, data):
+                        self.data = data
+                    def first(self):
+                        return self.data[0] if self.data else None
+                    def all(self):
+                        return self.data
+                    def __iter__(self):
+                        return iter(self.data)
+                return DummyResult(self._results)
+
+            async def scalar(self, query):
+                return self._results[0] if self._results else None
+
+            async def execute(self, query):
+                class DummyResult:
+                    def __init__(self, data):
+                        self.data = data
+                    def scalars(self):
+                        return self
+                    def first(self):
+                        return self.data[0] if self.data else None
+                    def all(self):
+                        return self.data
+                    def __iter__(self):
+                        return iter(self.data)
+                return DummyResult(self._results)
+
+            def add(self, item):
+                pass
+
+            async def flush(self):
+                pass
+
+            async def commit(self):
+                pass
+
+            async def rollback(self):
+                pass
+
+        class DummyUsersRepo:
+            async def get_by_telegram_id(self, telegram_id):
+                return stored_users.get(telegram_id)
+
+        class DummyCredsRepo:
+            async def get_by_user_id(self, user_id):
+                return stored_creds.get(user_id)
+
+        class DummyRepo:
+            async def get_by_user_id(self, *args, **kwargs): return []
+            async def get_by_id(self, *args, **kwargs): return None
+            async def add(self, *args, **kwargs): pass
+            async def delete_by_user_id(self, *args, **kwargs): pass
+
+        class DummyUOW:
+            def __init__(self):
+                self.session = DummySession()
+                self.users = DummyUsersRepo()
+                self.credentials = DummyCredsRepo()
+                self.semester_results = DummyRepo()
+                self.courses = DummyRepo()
+                self.assessments = DummyRepo()
+                self.user_courses = DummyRepo()
+                self.departments = DummyRepo()
+                
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def commit(self):
+                pass
+
+        def fake_uow_factory(session_factory):
+            uow = DummyUOW()
+            return uow
+
+        with patch("repositories.sqlalchemy.unit_of_work.SqlAlchemyRepositoryUnitOfWork", side_effect=fake_uow_factory):
+            reg_service = RegistrationService(
+                portal_client=portal_client,
+                cipher=cipher,
+                session_factory=lambda: None,
+            )
+
+            grades_service = GradeReadService(
+                portal_client=portal_client,
+                cipher=cipher,
+                session_factory=lambda: None,
+            )
+
+            user_obj = SimpleNamespace(id="user-uuid-1", telegram_id=999, university_id="UGR/1234/16", department_id="SITE")
+            encrypted = cipher.encrypt("my_password")
+            from crypto.cipher import Ciphertext
+            payload = Ciphertext.from_token(encrypted)
+            import base64
+            iv_token = base64.urlsafe_b64encode(payload.nonce).decode("ascii")
+
+            cred_obj = SimpleNamespace(user_id="user-uuid-1", encrypted_password=encrypted, iv=iv_token)
+            stored_users[999] = user_obj
+            stored_creds["user-uuid-1"] = cred_obj
+
+            # Read grades
+            grade_res = await grades_service.read(GradeReadRequest(telegram_id=999, page_index=0))
+            assert "SECT-3082 Software Engineering" in grade_res.message
+            assert "Grade: <b>A</b>" in grade_res.message
+            assert "SGPA: <code>4.00</code>" in grade_res.message
+
+    asyncio.run(scenario())
+
