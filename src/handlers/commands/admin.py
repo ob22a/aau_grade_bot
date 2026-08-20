@@ -108,6 +108,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             await message.answer(
                 f"🛠 <b>Admin Dashboard</b>\n\n"
                 "Commands:\n"
+                "/settings - View all current settings\n"
                 "/setsetting &lt;key&gt; &lt;value&gt; - Update a setting\n"
                 "/metrics - View bot metrics\n"
                 "/broadcast - Send a broadcast message\n"
@@ -116,6 +117,23 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             )
         except Exception as exc:
             await message.answer(f"❌ Failed to load admin dashboard: {html.escape(str(exc))}")
+
+    @router.message(Command("settings"))
+    async def view_settings(message: Message, state: FSMContext) -> None:
+        """Shows all system settings."""
+        await state.clear()
+        try:
+            settings_dict = await services.admin.get_all_settings()
+            if not settings_dict:
+                await message.answer("No settings found in the database.")
+                return
+            
+            msg = "⚙️ <b>Current System Settings:</b>\n\n"
+            for k, v in settings_dict.items():
+                msg += f"• <b>{html.escape(str(k))}</b>: <code>{html.escape(str(v))}</code>\n"
+            await message.answer(msg)
+        except Exception as exc:
+            await message.answer(f"❌ Failed to fetch settings: {html.escape(str(exc))}")
 
     @router.message(Command("start_service"))
     async def cmd_start_service(message: Message, state: FSMContext) -> None:

@@ -77,6 +77,14 @@ class AdminService:
             
         return SettingsUpdateResult(message="Failed: No repository configured")
 
+    async def get_all_settings(self) -> dict[str, str]:
+        """Returns all system settings from the database."""
+        if self.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                return await uow.settings.get_all()
+        return {}
+
     async def metrics_snapshot(self) -> MetricsSnapshot:
         """Generates a snapshot of current system metrics and active user counts."""
         if self.metrics is not None:

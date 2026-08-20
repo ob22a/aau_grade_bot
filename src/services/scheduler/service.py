@@ -145,15 +145,15 @@ class SchedulerService:
                 return SchedulerRunResult(started_at=started_at, skipped=True, message="No DB")
 
             async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
-                enabled_setting = await uow.settings.get("is_scheduling_enabled")
-                if not enabled_setting or enabled_setting.lower() != "true":
-                    return SchedulerRunResult(started_at=started_at, skipped=True, message="Scheduling disabled")
-
                 # Inactivity cleanup
                 cleanup_enabled = await uow.settings.get("is_inactivity_cleanup_enabled")
                 if not cleanup_enabled or cleanup_enabled.lower() != "false":
                     lifecycle = AccountLifecycleService(notifier=self.notification_service, session_factory=self.session_factory)
                     await lifecycle.cleanup_inactive_users(60)
+
+                enabled_setting = await uow.settings.get("is_scheduling_enabled")
+                if not enabled_setting or enabled_setting.lower() != "true":
+                    return SchedulerRunResult(started_at=started_at, skipped=True, message="Scheduling disabled")
 
                 curr_year_set = await uow.settings.get("current_academic_year")
                 curr_sem_set = await uow.settings.get("current_semester")

@@ -32,3 +32,8 @@ class SqlAlchemySystemSettingRepository:
                 .where(SystemSetting.key == key)
                 .values(value=value)
             )
+
+    async def get_all(self) -> dict[str, str]:
+        statement = select(SystemSetting)
+        result = await self.session.execute(statement)
+        return {setting.key: setting.value for setting in result.scalars().all()}

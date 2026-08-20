@@ -59,11 +59,11 @@ async def test_registration_handler_with_db_no_detached_error(sqlite_session_fac
         async def is_registered(self, tid): return False
 
     class DummyLifecycleService:
-        pass
+        async def is_registered(self, tid): return False
 
     from services.container import ApplicationServices
-    ApplicationServices.registration_service = DummyRegistrationService()
-    ApplicationServices.lifecycle_service = DummyLifecycleService()
+    ApplicationServices.registration = DummyRegistrationService()
+    ApplicationServices.lifecycle = DummyLifecycleService()
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(build_registration_router(ApplicationServices))
