@@ -6,7 +6,7 @@ the way it is, see [architecture/decisions](./decisions/README.md)  this
 document stays descriptive on purpose, so it doesn't drift out of sync with
 reasoning that belongs elsewhere.
 
-**Live, browsable schema:** [dbdiagram.io/d/6a4be02a4ac62e474c40010f](https://dbdiagram.io/d/6a4be02a4ac62e474c40010f)
+**Live, browsable schema:** [dbdiagram.io/d/AAU-Grade-BOT-6a4be02a4ac62e474c40010f](https://dbdiagram.io/d/AAU-Grade-BOT-6a4be02a4ac62e474c40010f)
  every column, type, and constraint, kept in sync with `models.py`. The
 diagrams below are grouped by domain and trimmed to what matters for
 understanding *relationships*, not a full column reference  use dbdiagram
