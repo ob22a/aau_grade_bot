@@ -10,3 +10,5 @@ beautifulsoup4
 pydantic-settings
 cryptography
 redis
+aiosqlite
+pytest-asyncio

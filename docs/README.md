@@ -12,37 +12,93 @@ The repository is organized as a layered application:
 - `crypto/` encrypts sensitive data at rest.
 - `docs/` explains how the system works, why it is shaped that way, and how to run it.
 
-## What it does
+## 🚀 Key Features
 
-- Registers a user by validating AAU credentials once.
-- Stores credentials and grade data encrypted with AES-256-GCM.
-- Reads home, grade, and assessment HTML safely through parser DTOs.
-- Caches grade snapshots to reduce load.
-- Runs cron-based cohort scans with a distributed lock.
-- Sends admin alerts on portal schema changes and operational failures.
-- Uses Redis-backed FSM storage when available.
+- **Automated Grade Fetching**: Runs intelligent, cohort-based cron scans in the background to detect new grades without DDOSing the university portal.
+- **Instant Telegram Notifications**: Tailored, rich messages sent to users the exact moment their grades are published.
+- **Military-Grade Security**: Portal passwords are encrypted at rest using AES-256-GCM. The bot never stores plaintext passwords (ADR-001).
+- **Anti-Lockout Protection**: Automatically pauses automated scraping if a password expires or changes, protecting university accounts from being locked out due to invalid attempts (ADR-021).
+- **Atomic Concurrency**: Distributed locks and semaphores using Redis ensure cron jobs don't overlap and outward HTTP connections are strictly limited (ADR-019).
+- **Customizable FSM**: Change your department, section, or password on the fly with a simple inline keyboard menu backed by Redis FSM state.
 
-## Architecture Diagrams
+## 🏗️ Architecture Diagrams
 
-### System Components Flow
+### Strict Layering (Ports and Adapters)
+
+The project is structured using Domain-Driven Design and Hexagonal Architecture principles. Changes to the Telegram API do not affect business logic, and changes to the database do not break the portal scrapers.
 
 ```mermaid
-flowchart TD
-    User((Telegram User)) --> |Commands / Callbacks| Telegram[Telegram API]
-    Telegram --> |Updates| Bot[aiogram Bot]
-    Bot --> Handlers[Handlers]
+graph TD
+    %% Entrypoints
+    User((Telegram User)) -->|Commands/Callbacks| Handlers
+    Cron((Background Cron)) -->|Scheduled Trigger| SchedulerService
+
+    subgraph "Presentation Layer (aiogram)"
+        Handlers[Command Handlers & Middlewares]
+    end
+
+    subgraph "Application Services (Domain Logic)"
+        RegistrationService
+        GradeReadService
+        AccountLifecycleService
+        SchedulerService
+    end
+
+    subgraph "Ports (Interfaces)"
+        UoWPort(Unit of Work Port)
+        PortalPort(Portal Client Port)
+    end
+
+    subgraph "Infrastructure Layer (Adapters)"
+        UoWAdapter[SQLAlchemy UnitOfWork]
+        PortalAdapter[Aiohttp Portal Scraper]
+        DB[(PostgreSQL)]
+        Redis[(Redis Cache & Locks)]
+    end
+
+    Handlers --> RegistrationService
+    Handlers --> GradeReadService
+    Handlers --> AccountLifecycleService
     
-    Handlers --> FSM[FSM Storage<br/>Redis / Memory]
-    Handlers --> Services[Application Services]
+    RegistrationService --> UoWPort
+    RegistrationService --> PortalPort
+    GradeReadService --> UoWPort
+    GradeReadService --> PortalPort
+    SchedulerService --> UoWPort
+    SchedulerService --> PortalPort
+
+    UoWPort -.-> UoWAdapter
+    PortalPort -.-> PortalAdapter
     
-    Services --> UnitOfWork[Unit of Work / Repositories]
-    UnitOfWork --> DB[(PostgreSQL Database)]
-    
-    Services --> Crypto[Crypto Module<br/>AES-256-GCM]
-    
-    Services --> PortalClient[Portal Adapter]
-    PortalClient --> Parser[HTML Parser DTOs]
-    PortalClient --> Portal[AAU Web Portal]
+    UoWAdapter --> DB
+    GradeReadService --> Redis
+    SchedulerService --> Redis
+```
+
+### Cohort Scanning Sequence
+
+To prevent overloading the university portal, the scheduler groups students into cohorts and scrapes grades for **one representative student** per cohort. Only if new grades are detected does it fan out.
+
+```mermaid
+sequenceDiagram
+    participant Cron as Scheduler Task
+    participant DB as Database
+    participant Scraper as AAU Portal
+    participant Notification as Telegram Users
+
+    Cron->>DB: Identify stale cohorts
+    DB-->>Cron: Return representative student IDs
+    Cron->>Scraper: Scrape grades for Representative
+    Scraper-->>Cron: Return current grades
+    Cron->>Cron: Diff with stored grades
+    alt No Change
+        Cron->>DB: Update Cohort 'last_probe_at'
+    else New Grades Detected
+        Cron->>DB: Mark cohort as 'Grade Change Detected'
+        Cron->>Scraper: Exhaustive scrape for all users in cohort
+        Scraper-->>Cron: User grades
+        Cron->>Notification: Broadcast tailored results to students
+    end
 ```
 
 ### Core Database Entities
