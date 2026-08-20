@@ -50,19 +50,41 @@ class RedisCache:
         self.redis = redis.from_url(url, decode_responses=True)
 
     async def get(self, key: str) -> str | None:
-        return await self.redis.get(key)
+        try:
+            return await self.redis.get(key)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Redis get error: {e}")
+            return None
 
     async def set(self, key: str, value: str, ttl_seconds: int | None = None) -> None:
-        if ttl_seconds is not None:
-            await self.redis.setex(key, ttl_seconds, value)
-        else:
-            await self.redis.set(key, value)
+        try:
+            if ttl_seconds is not None:
+                await self.redis.setex(key, ttl_seconds, value)
+            else:
+                await self.redis.set(key, value)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Redis set error: {e}")
 
     async def delete(self, key: str) -> None:
-        await self.redis.delete(key)
+        try:
+            await self.redis.delete(key)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Redis delete error: {e}")
 
     async def acquire_lock(self, key: str, ttl_seconds: int = 30) -> bool:
-        return await self.redis.set(key, "1", nx=True, ex=ttl_seconds)
+        try:
+            return await self.redis.set(key, "1", nx=True, ex=ttl_seconds)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Redis acquire_lock error: {e}")
+            return True # If Redis fails, allow the scrape to proceed as a fallback
 
     async def release_lock(self, key: str) -> None:
-        await self.redis.delete(key)
+        try:
+            await self.redis.delete(key)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Redis release_lock error: {e}")

@@ -89,7 +89,7 @@ class AccountLifecycleService:
                     audit = AuditLog(
                         telegram_id=request.telegram_id,
                         action="account_deletion_requested",
-                        details={"confirmed": True},
+                        details={"confirmed": True, "reason": request.reason},
                     )
                     await uow.audit_logs.add(audit)
                     await uow.commit()
@@ -320,7 +320,7 @@ class AccountLifecycleService:
             users_to_delete = inactive_users
             
         for user in users_to_delete:
-            req = AccountDeletionRequest(telegram_id=user.telegram_id, confirm=True)
+            req = AccountDeletionRequest(telegram_id=user.telegram_id, confirm=True, reason="inactivity_purge")
             res = await self.request_deletion(req)
             if res.deleted:
                 deleted_count += 1

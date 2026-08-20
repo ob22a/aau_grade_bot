@@ -244,7 +244,16 @@ class GradeReadService:
                                 )
                                 
                                 # Save to DB
-                                from database.models import Semester
+                                from database.models import Semester, AuditLog
+                                
+                                # Audit manual scrape success
+                                audit_success = AuditLog(
+                                    telegram_id=request.telegram_id,
+                                    action="manual_scrape",
+                                    details={"success": True, "university_id": db_user.university_id}
+                                )
+                                uow.session.add(audit_success)
+
                                 def parse_semester(label: str) -> Semester:
                                     lab = label.lower()
                                     if "2" in lab or "two" in lab or "second" in lab or " ii" in lab:
@@ -363,6 +372,8 @@ class GradeReadService:
                             except Exception as scrape_err:
                                 import logging
                                 from clients.aau_portal import PortalSchemaChangedError, PortalAuthenticationError
+                                from database.models import AuditLog
+                                
                                 if isinstance(scrape_err, PortalSchemaChangedError) and self.notification_service is not None:
                                     snippet = getattr(scrape_err.diagnostic, "html_snippet", "")
                                     await getattr(self.notification_service, "send_admin", self.notification_service.send_admin_alert)(
@@ -372,12 +383,29 @@ class GradeReadService:
                                 elif isinstance(scrape_err, PortalAuthenticationError):
                                     # Mark credentials as invalid to prevent lockout (ADR 021)
                                     cred.is_valid = False
+                                    
+                                    audit_fail = AuditLog(
+                                        telegram_id=request.telegram_id,
+                                        action="authentication_failed",
+                                        details={"reason": "invalid_credentials", "university_id": db_user.university_id}
+                                    )
+                                    uow.session.add(audit_fail)
+                                    
                                     await uow.commit()
                                     if self.notification_service is not None and hasattr(self.notification_service, "send_user"):
                                         await self.notification_service.send_user(
                                             request.telegram_id,
                                             "⚠️ <b>Authentication Failed</b>\nYour AAU portal password appears to have been changed or is incorrect. Automated grade checking has been paused. Please use /change_password to update it."
                                         )
+                                else:
+                                    audit_fail = AuditLog(
+                                        telegram_id=request.telegram_id,
+                                        action="manual_scrape_failed",
+                                        details={"reason": str(scrape_err), "university_id": db_user.university_id}
+                                    )
+                                    uow.session.add(audit_fail)
+                                    await uow.commit()
+
                                 logging.getLogger(__name__).warning(f"Portal scrape failed for user: {scrape_err}")
                             finally:
                                 if self.cache is not None:

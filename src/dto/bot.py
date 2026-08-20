@@ -60,6 +60,7 @@ class SettingsUpdateRequest:
 class AccountDeletionRequest:
     telegram_id: int
     confirm: bool = False
+    reason: str = "user_requested"
 
 
 @dataclass(frozen=True)
