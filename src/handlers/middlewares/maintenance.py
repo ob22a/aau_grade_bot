@@ -24,8 +24,10 @@ class MaintenanceMiddleware(BaseMiddleware):
             user = event.message.from_user
         elif event.callback_query:
             user = event.callback_query.from_user
+            
+        admins = self.settings.admins_telegram_id or []
 
-        if user and user.id not in self.settings.admins_telegram_id:
+        if user and user.id not in admins:
             settings_dict = await self.services.admin.get_all_settings()
             if settings_dict.get("is_maintenance_mode", "false").lower() == "true":
                 msg = "🛠 <b>Bot is currently under maintenance.</b>\n\nPlease try again later."
