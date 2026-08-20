@@ -22,7 +22,8 @@ def build_start_router(settings: Settings, services: ApplicationServices) -> Rou
         is_admin = False
         if message.from_user:
             is_registered = await services.lifecycle.is_registered(message.from_user.id)
-            if message.from_user.id in settings.admins_telegram_id:
+            admins = settings.admins_telegram_id or []
+            if message.from_user.id in admins:
                 is_admin = True
             
         if is_registered:
