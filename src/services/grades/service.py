@@ -101,8 +101,8 @@ class GradeReadService:
 
         filtered_reports = []
         for rep in reports_list:
-            rep_year = getattr(rep, "year_label", "N/A")
-            rep_sem = getattr(rep, "semester", "N/A")
+            rep_year = getattr(rep, "year_label", getattr(rep, "academic_year", "N/A"))
+            rep_sem = getattr(rep, "semester_label", getattr(rep, "semester", "N/A"))
             
             if year_filter and year_filter != "All" and year_filter != "All Years":
                 yf_num = extract_year_num(year_filter)
@@ -221,103 +221,172 @@ class GradeReadService:
                                         total_pages=len(pages),
                                         report=rep
                                     )
-                            # Force refresh from portal
-                            lock_key = f"lock:scrape:{request.telegram_id}"
-                            if self.cache is not None:
-                                if not await self.cache.acquire_lock(lock_key, ttl_seconds=60):
-                                    return GradeReadResult(
-                                        message="⏳ <b>Refresh in progress...</b>\nA grade refresh is already in progress. Please wait a moment for it to complete.",
-                                        cached=False,
-                                        current_page=0,
-                                        total_pages=1,
-                                        report=None
+                        # Force refresh from portal
+                        lock_key = f"lock:scrape:{request.telegram_id}"
+                        if self.cache is not None:
+                            if not await self.cache.acquire_lock(lock_key, ttl_seconds=60):
+                                return GradeReadResult(
+                                    message="⏳ <b>Refresh in progress...</b>\nA grade refresh is already in progress. Please wait a moment for it to complete.",
+                                    cached=False,
+                                    current_page=0,
+                                    total_pages=1,
+                                    report=None
+                                )
+                                
+                        cred = await uow.credentials.get_by_user_id(db_user.id)
+                        if cred is not None and self.portal_client is not None:
+                            try:
+                                password = self.cipher.decrypt(cred.encrypted_password)
+                                _profile, grade_reports = await self.portal_client.scrape(
+                                    db_user.university_id,
+                                    password,
+                                    db_user.university_id,
+                                )
+                                
+                                # Save to DB
+                                from database.models import Semester
+                                def parse_semester(label: str) -> Semester:
+                                    lab = label.lower()
+                                    if "2" in lab or "two" in lab or "second" in lab or " ii" in lab:
+                                        return Semester.SECOND
+                                    if "3" in lab or "three" in lab or "third" in lab or "iii" in lab:
+                                        return Semester.THIRD
+                                    return Semester.FIRST
+                                    
+                                from sqlalchemy import delete
+                                await uow.session.execute(delete(SemesterResult).where(SemesterResult.user_id == db_user.id))
+                                
+                                import base64
+                                from crypto.cipher import Ciphertext
+                                for rep in grade_reports:
+                                    rep_json = json.dumps(rep.model_dump())
+                                    enc_rep = self.cipher.encrypt(rep_json)
+                                    rep_payload = Ciphertext.from_token(enc_rep)
+                                    rep_iv = base64.urlsafe_b64encode(rep_payload.nonce).decode("ascii")
+                                    sr = SemesterResult(
+                                        user_id=db_user.id,
+                                        academic_year=rep.academic_year,
+                                        semester=parse_semester(rep.semester_label),
+                                        encrypted_result_detail=enc_rep,
+                                        iv=rep_iv,
                                     )
+                                    uow.session.add(sr)
                                     
-                            cred = await uow.credentials.get_by_user_id(db_user.id)
-                            if cred is not None and self.portal_client is not None:
-                                try:
-                                    password = self.cipher.decrypt(cred.encrypted_password)
-                                    _profile, grade_reports = await self.portal_client.scrape(
-                                        db_user.university_id,
-                                        password,
-                                        db_user.university_id,
-                                    )
+                                    # Save Courses, UserCourses, Assessments, and DepartmentCourses
+                                    from database.models import Course, UserCourse, Assessment, DepartmentCourse
+                                    from sqlalchemy import select
                                     
-                                    # Save to DB
-                                    from database.models import Semester
-                                    def parse_semester(label: str) -> Semester:
-                                        lab = label.lower()
-                                        if "2" in lab or "two" in lab or "second" in lab or " ii" in lab:
-                                            return Semester.SECOND
-                                        if "3" in lab or "three" in lab or "third" in lab or "iii" in lab:
-                                            return Semester.THIRD
-                                        return Semester.FIRST
-                                        
-                                    from sqlalchemy import delete
-                                    await uow.session.execute(delete(SemesterResult).where(SemesterResult.user_id == db_user.id))
-                                    
-                                    import base64
-                                    from crypto.cipher import Ciphertext
-                                    for rep in grade_reports:
-                                        rep_json = json.dumps(rep.model_dump())
-                                        enc_rep = self.cipher.encrypt(rep_json)
-                                        rep_payload = Ciphertext.from_token(enc_rep)
-                                        rep_iv = base64.urlsafe_b64encode(rep_payload.nonce).decode("ascii")
-                                        sr = SemesterResult(
-                                            user_id=db_user.id,
-                                            academic_year=rep.academic_year,
-                                            semester=parse_semester(rep.semester_label),
-                                            encrypted_result_detail=enc_rep,
-                                            iv=rep_iv,
-                                        )
-                                        uow.session.add(sr)
-                                    await uow.commit()
+                                    for cg in rep.course_grades:
+                                        # Ensure Course exists
+                                        course_db = await uow.courses.get_by_id(cg.course_code)
+                                        if not course_db:
+                                            course_db = Course(
+                                                course_id=cg.course_code,
+                                                course_name=cg.course_name,
+                                                credit_hours=int(cg.credit_hours) if cg.credit_hours else 0,
+                                                ects=int(cg.ects) if cg.ects else 0,
+                                            )
+                                            await uow.courses.add(course_db)
+                                            await uow.session.flush()
+                                            
+                                        if db_user.department_id:
+                                            dc_stmt = select(DepartmentCourse).where(
+                                                DepartmentCourse.department_id == db_user.department_id,
+                                                DepartmentCourse.course_id == course_db.course_id
+                                            )
+                                            dc_db = await uow.session.scalar(dc_stmt)
+                                            if not dc_db:
+                                                dc_db = DepartmentCourse(
+                                                    department_id=db_user.department_id,
+                                                    course_id=course_db.course_id
+                                                )
+                                                uow.session.add(dc_db)
 
-                                    pages = self._format_reports_to_pages(grade_reports, request.year_filter, request.semester_filter)
-                                    if pages:
-                                        if self.cache is not None:
-                                            await self.cache.set(cooldown_key, "1", ttl_seconds=self.manual_scrape_cooldown_minutes * 60)
-                                        idx = max(0, min(request.page_index, len(pages) - 1))
-                                        msg, rep = pages[idx]
-                                        return GradeReadResult(
-                                            message=msg,
-                                            cached=False,
-                                            current_page=idx,
-                                            total_pages=len(pages),
-                                            report=rep
+                                        # Create or update UserCourse
+                                        uc_stmt = select(UserCourse).where(
+                                            UserCourse.user_id == db_user.id,
+                                            UserCourse.course_id == course_db.course_id,
+                                            UserCourse.academic_year == rep.academic_year,
+                                            UserCourse.semester == parse_semester(rep.semester_label)
                                         )
-                                except Exception as scrape_err:
-                                    import logging
-                                    from clients.aau_portal import PortalSchemaChangedError
-                                    if isinstance(scrape_err, PortalSchemaChangedError) and self.notification_service is not None:
-                                        snippet = getattr(scrape_err.diagnostic, "html_snippet", "")
-                                        await self.notification_service.send_admin_alert(
-                                            f"Portal schema changed during grades refresh: {scrape_err}",
-                                            snippet
-                                        )
-                                    logging.getLogger(__name__).warning(f"Portal scrape failed for user: {scrape_err}")
-                                finally:
+                                        uc_db = await uow.session.scalar(uc_stmt)
+                                        if not uc_db:
+                                            uc_db = UserCourse(
+                                                user_id=db_user.id,
+                                                course_id=course_db.course_id,
+                                                academic_year=rep.academic_year,
+                                                semester=parse_semester(rep.semester_label)
+                                            )
+                                            uow.session.add(uc_db)
+                                            await uow.session.flush()
+
+                                        # Save Assessment reference
+                                        asm_dict = {
+                                            "reference": cg.assessment.model_dump() if cg.assessment else None,
+                                            "grade": cg.grade
+                                        }
+                                        enc_asm = self.cipher.encrypt(json.dumps(asm_dict))
+                                        asm_payload = Ciphertext.from_token(enc_asm)
+                                        asm_iv = base64.urlsafe_b64encode(asm_payload.nonce).decode("ascii")
+
+                                        asm_stmt = select(Assessment).where(Assessment.user_course_id == uc_db.id)
+                                        asm_db = await uow.session.scalar(asm_stmt)
+                                        if not asm_db:
+                                            asm_db = Assessment(
+                                                user_course_id=uc_db.id,
+                                                encrypted_assessment_detail=enc_asm,
+                                                encrypted_grade=enc_asm,
+                                                iv=asm_iv
+                                            )
+                                            uow.session.add(asm_db)
+                                        else:
+                                            # Don't overwrite if it already has detailed scores, only if it's just reference
+                                            asm_db.encrypted_assessment_detail = enc_asm
+                                            asm_db.encrypted_grade = enc_asm
+                                            asm_db.iv = asm_iv
+                                            
+                                await uow.commit()
+
+                                pages = self._format_reports_to_pages(grade_reports, request.year_filter, request.semester_filter)
+                                if pages:
                                     if self.cache is not None:
-                                        await self.cache.release_lock(lock_key)
-            except Exception as db_err:
+                                        await self.cache.set(cooldown_key, "1", ttl_seconds=self.manual_scrape_cooldown_minutes * 60)
+                                    idx = max(0, min(request.page_index, len(pages) - 1))
+                                    msg, rep = pages[idx]
+                                    return GradeReadResult(
+                                        message=msg,
+                                        cached=False,
+                                        current_page=idx,
+                                        total_pages=len(pages),
+                                        report=rep
+                                    )
+                            except Exception as scrape_err:
+                                import logging
+                                from clients.aau_portal import PortalSchemaChangedError, PortalAuthenticationError
+                                if isinstance(scrape_err, PortalSchemaChangedError) and self.notification_service is not None:
+                                    snippet = getattr(scrape_err.diagnostic, "html_snippet", "")
+                                    await getattr(self.notification_service, "send_admin", self.notification_service.send_admin_alert)(
+                                        f"Portal schema changed during grades refresh: {scrape_err}",
+                                        snippet
+                                    )
+                                elif isinstance(scrape_err, PortalAuthenticationError):
+                                    # Mark credentials as invalid to prevent lockout (ADR 021)
+                                    cred.is_valid = False
+                                    await uow.commit()
+                                    if self.notification_service is not None and hasattr(self.notification_service, "send_user"):
+                                        await self.notification_service.send_user(
+                                            request.telegram_id,
+                                            "⚠️ <b>Authentication Failed</b>\nYour AAU portal password appears to have been changed or is incorrect. Automated grade checking has been paused. Please use /change_password to update it."
+                                        )
+                                logging.getLogger(__name__).warning(f"Portal scrape failed for user: {scrape_err}")
+                            finally:
+                                if self.cache is not None:
+                                    await self.cache.release_lock(lock_key)
+            except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"DB user query failed: {db_err}")
+                logging.getLogger(__name__).error(f"Error checking cooldown or parsing DB: {e}", exc_info=True)
 
-        # 3. Check repository if provided
-        if self.repository is not None:
-            stored = await self.repository.get_by_user_id(str(request.telegram_id))
-            if stored is not None:
-                message = getattr(stored, "message", "Grades retrieved")
-                if self.cache is not None:
-                    await self.cache.set(cache_key, message, ttl_seconds=1800)
-                return GradeReadResult(
-                    message=message,
-                    cached=False,
-                    current_page=0,
-                    total_pages=1,
-                )
-
-        # 4. Default fallback message if no grades exist yet
+        # Fallback: no grades found via any path
         return GradeReadResult(
             message=(
                 "No grades available yet. Please use /register to connect your AAU account "
@@ -328,3 +397,84 @@ class GradeReadService:
             total_pages=1,
         )
 
+    async def read_assessment(self, telegram_id: int, course_code: str, reference: Any) -> str:
+        """Fetch assessment details from DB or Portal."""
+        if not hasattr(reference, "academic_year_id"):
+            return "Invalid reference."
+            
+        if self.session_factory is not None and self.cipher is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from database.models import UserCourse, Assessment
+            from sqlalchemy import select
+            import json
+            from parser.models import AssessmentDetailsResult
+
+            async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
+                db_user = await uow.users.get_by_telegram_id(telegram_id)
+                if not db_user:
+                    return "User not found."
+                
+                # Try finding it in DB first
+                uc_stmt = select(UserCourse).where(UserCourse.user_id == db_user.id, UserCourse.course_id == course_code)
+                ucs = await uow.session.scalars(uc_stmt)
+                # Just take the first matching user_course that has this assessment (we don't know the year/sem here exactly, but it should be unique enough for the course, or we can just try all)
+                for uc in ucs:
+                    asm_stmt = select(Assessment).where(Assessment.user_course_id == uc.id)
+                    asm_db = await uow.session.scalar(asm_stmt)
+                    if asm_db:
+                        try:
+                            decrypted = self.cipher.decrypt(asm_db.encrypted_assessment_detail)
+                            data = json.loads(decrypted)
+                            if "scores" in data:
+                                # It's a full detail, not just a reference
+                                det = AssessmentDetailsResult.model_validate_json(decrypted)
+                                return self._format_assessment(det)
+                        except Exception:
+                            pass
+                            
+                # If we get here, we need to scrape
+                cred = await uow.credentials.get_by_user_id(db_user.id)
+                if not cred or not self.portal_client:
+                    return "Credentials missing or portal client not configured."
+                    
+                password = self.cipher.decrypt(cred.encrypted_password)
+                
+                det_result = await self.portal_client.scrape_assessment(
+                    db_user.university_id,
+                    password,
+                    db_user.university_id,
+                    reference.academic_year_id,
+                    reference.semester_id,
+                    reference.course_id
+                )
+                
+                # Save it back if we can find the Assessment row
+                # We need to know which uc it is.
+                # The reference.course_id is the GUID on AAU side, not the course_code
+                # But we know course_code. Let's just find the first uc with course_code and update its Assessment.
+                uc_stmt = select(UserCourse).where(UserCourse.user_id == db_user.id, UserCourse.course_id == course_code)
+                uc = await uow.session.scalar(uc_stmt)
+                if uc:
+                    asm_stmt = select(Assessment).where(Assessment.user_course_id == uc.id)
+                    asm_db = await uow.session.scalar(asm_stmt)
+                    if asm_db:
+                        from crypto.cipher import Ciphertext
+                        import base64
+                        new_json = det_result.model_dump_json()
+                        enc_asm = self.cipher.encrypt(new_json)
+                        asm_db.encrypted_assessment_detail = enc_asm
+                        await uow.commit()
+
+                return self._format_assessment(det_result)
+
+        return "Service unavailable."
+
+    def _format_assessment(self, result: Any) -> str:
+        if not result or not result.assessment:
+            return "No details found."
+        a = result.assessment
+        lines = []
+        for s in sorted(a.scores, key=lambda x: x.sequence):
+            lines.append(f"• {s.name}: <code>{s.score}</code>")
+        lines.append(f"\n<b>Total:</b> <code>{a.total_mark} / {a.total_possible}</code>")
+        return "\n".join(lines)

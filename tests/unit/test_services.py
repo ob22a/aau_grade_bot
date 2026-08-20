@@ -189,13 +189,13 @@ async def _registration_round_trip() -> None:
             session_factory=MagicMock(),
         )
 
-    outcome = await service.register(
-        RegistrationRequest(
-            telegram_id=1,
-            university_id=" ugr/0000/16 ",
-            password="password123",
+        outcome = await service.register(
+            RegistrationRequest(
+                telegram_id=1,
+                university_id=" ugr/0000/16 ",
+                password="password123",
+            )
         )
-    )
 
     assert outcome.result.success is True
     assert portal.calls[0][0] == "UGR/0000/16"

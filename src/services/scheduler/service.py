@@ -52,8 +52,8 @@ class SchedulerService:
             return Semester.THIRD
         return Semester.FIRST
 
-    async def _detect_grade_diff(self, old_reports: list[GradeReport], new_reports: list[GradeReport]) -> list[str]:
-        """Returns a list of course codes that have newly released grades."""
+    async def _detect_grade_diff(self, old_reports: list[GradeReport], new_reports: list[GradeReport]) -> tuple[list[str], set[str]]:
+        """Returns a list of course codes that have newly released grades, and a set of all currently graded courses."""
         old_grades = {}
         for rep in old_reports:
             for cg in rep.course_grades:
@@ -61,21 +61,23 @@ class SchedulerService:
                     old_grades[cg.course_code] = cg.grade
 
         new_released = []
+        all_graded = set()
         for rep in new_reports:
             for cg in rep.course_grades:
                 if cg.grade and cg.grade.strip() and cg.grade.strip().upper() != "N/A":
+                    all_graded.add(f"{cg.course_name} ({cg.course_code})")
                     if cg.course_code not in old_grades:
                         new_released.append(f"{cg.course_name} ({cg.course_code})")
-        return new_released
+        return new_released, all_graded
 
-    async def _scrape_user_and_detect(self, uow: SqlAlchemyRepositoryUnitOfWork, user: User, current_year: str, current_semester: Semester) -> list[str]:
-        """Scrapes a user, updates DB, and returns a list of newly released subjects."""
+    async def _scrape_user_and_detect(self, uow: SqlAlchemyRepositoryUnitOfWork, user: User, current_year: str, current_semester: Semester) -> tuple[list[str], set[str]]:
+        """Scrapes a user, updates DB, and returns a list of newly released subjects and all currently graded subjects."""
         if not self.portal_client or not self.cipher:
-            return []
+            return [], set()
 
-        cred = await uow.session.scalar(select(UserCredential).where(UserCredential.user_id == user.id))
+        cred = await uow.credentials.get_by_user_id(user.id)
         if not cred:
-            return []
+            return [], set()
             
         try:
             password = self.cipher.decrypt(cred.encrypted_password)
@@ -85,7 +87,7 @@ class SchedulerService:
             return []
 
         # Load old reports
-        db_results = await uow.session.scalars(select(SemesterResult).where(SemesterResult.user_id == user.id))
+        db_results = await uow.semester_results.get_by_user_id(user.id)
         old_reports = []
         for res in db_results:
             try:
@@ -93,10 +95,10 @@ class SchedulerService:
             except:
                 pass
 
-        new_released = await self._detect_grade_diff(old_reports, new_reports)
+        new_released, all_graded = await self._detect_grade_diff(old_reports, new_reports)
 
         # Save new reports back
-        await uow.session.execute(delete(SemesterResult).where(SemesterResult.user_id == user.id))
+        await uow.semester_results.delete_by_user_id(user.id)
         for rep in new_reports:
             rep_json = json.dumps(rep.model_dump())
             enc_rep = self.cipher.encrypt(rep_json)
@@ -109,10 +111,10 @@ class SchedulerService:
                 encrypted_result_detail=enc_rep,
                 iv=rep_iv,
             )
-            uow.session.add(sr)
+            await uow.semester_results.add(sr)
         
         await uow.commit()
-        return new_released
+        return new_released, all_graded
 
     async def run_once(self) -> SchedulerRunResult:
         """
@@ -143,30 +145,30 @@ class SchedulerService:
                 return SchedulerRunResult(started_at=started_at, skipped=True, message="No DB")
 
             async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
-                enabled_setting = await uow.session.scalar(select(SystemSetting).where(SystemSetting.key == "is_scheduling_enabled"))
-                if not enabled_setting or enabled_setting.value.lower() != "true":
+                enabled_setting = await uow.settings.get("is_scheduling_enabled")
+                if not enabled_setting or enabled_setting.lower() != "true":
                     return SchedulerRunResult(started_at=started_at, skipped=True, message="Scheduling disabled")
 
                 # Inactivity cleanup
-                cleanup_enabled = await uow.session.scalar(select(SystemSetting).where(SystemSetting.key == "is_inactivity_cleanup_enabled"))
-                if not cleanup_enabled or cleanup_enabled.value.lower() != "false":
+                cleanup_enabled = await uow.settings.get("is_inactivity_cleanup_enabled")
+                if not cleanup_enabled or cleanup_enabled.lower() != "false":
                     lifecycle = AccountLifecycleService(notifier=self.notification_service, session_factory=self.session_factory)
                     await lifecycle.cleanup_inactive_users(60)
 
-                curr_year_set = await uow.session.scalar(select(SystemSetting).where(SystemSetting.key == "current_academic_year"))
-                curr_sem_set = await uow.session.scalar(select(SystemSetting).where(SystemSetting.key == "current_semester"))
+                curr_year_set = await uow.settings.get("current_academic_year")
+                curr_sem_set = await uow.settings.get("current_semester")
                 
                 if not curr_year_set or not curr_sem_set:
                     return SchedulerRunResult(started_at=started_at, skipped=True, message="Current term not configured")
                     
-                current_year = curr_year_set.value
+                current_year = curr_year_set
                 try:
-                    current_semester = Semester[curr_sem_set.value.upper()]
+                    current_semester = Semester[curr_sem_set.upper()]
                 except KeyError:
                     current_semester = Semester.FIRST
 
                 cron_run = CronRun(status=CronRunStatus.RUNNING)
-                uow.session.add(cron_run)
+                await uow.cron_runs.add(cron_run)
                 await uow.commit()
 
                 # Sync Cohorts
@@ -210,31 +212,28 @@ class SchedulerService:
 
                 cohorts_processed = 0
                 for state in eligible_states.all():
-                    rep_user = None
-                    if state.representative_user_id:
-                        rep_user = await uow.users.get_by_id(state.representative_user_id)
-                    
-                    if not rep_user or rep_user.department_id != state.department_id or rep_user.section != state.section:
-                        rep_user = await uow.session.scalar(
-                            select(User).where(
-                                and_(User.department_id == state.department_id, User.section == state.section)
-                            ).limit(1)
+                    # Scrape all users in this cohort
+                    from database.models import UserCredential
+                    cohort_users = await uow.session.scalars(
+                        select(User).join(User.credential).where(
+                            and_(
+                                User.department_id == state.department_id, 
+                                User.section == state.section,
+                                UserCredential.is_valid == True
+                            )
                         )
-                        if rep_user:
-                            state.representative_user_id = rep_user.id
-                            await uow.commit()
-                            
-                    if not rep_user:
-                        continue 
+                    )
+                    cohort_users_list = cohort_users.all()
+                    if not cohort_users_list:
+                        continue
 
-                    # Scrape Representative
                     scan = CohortScan(
                         run_id=cron_run.id,
                         department_id=state.department_id,
                         academic_year=state.academic_year,
                         semester=state.semester,
                         section=state.section,
-                        representative_user_id=rep_user.id,
+                        representative_user_id=None,
                         status=CohortScanStatus.IN_PROGRESS,
                         grade_change=GradeChangeStatus.NONE
                     )
@@ -244,56 +243,44 @@ class SchedulerService:
                     state.last_probe_at = datetime.now(timezone.utc)
                     await uow.commit()
                     
-                    new_subjects = await self._scrape_user_and_detect(uow, rep_user, current_year, current_semester)
+                    all_new_subjects = set()
+                    user_graded_subjects = {}  # user.telegram_id -> set of subjects they have graded
+                    newly_graded_users_per_subject = {} # subject -> list of telegram_ids
+
+                    for u in cohort_users_list:
+                        u_new_subjects, u_all_graded = await self._scrape_user_and_detect(uow, u, current_year, current_semester)
+                        user_graded_subjects[u.telegram_id] = u_all_graded
+                        
+                        for subj in u_new_subjects:
+                            all_new_subjects.add(subj)
+                            newly_graded_users_per_subject.setdefault(subj, []).append(u.telegram_id)
                     
-                    if new_subjects:
+                    if all_new_subjects:
                         scan.grade_change = GradeChangeStatus.DETECTED
                         state.last_grade_change_at = datetime.now(timezone.utc)
                         await uow.commit()
                         
-                        # Full Cohort Scrape
-                        cohort_users = await uow.session.scalars(
-                            select(User).where(
-                                and_(User.department_id == state.department_id, User.section == state.section)
-                            )
-                        )
-                        cohort_users_list = cohort_users.all()
-                        
-                        users_who_got_it = set()
-                        # Rep already scraped, and we know they got it
-                        users_who_got_it.add(rep_user.telegram_id)
-                        
-                        if self.notification_service:
-                            await self.notification_service.send_user(
-                                rep_user.telegram_id,
-                                f"🎉 <b>Grade Released!</b>\n\nYour grade for <b>{', '.join(new_subjects)}</b> has been released. Use /grades to check it."
-                            )
-
-                        for u in cohort_users_list:
-                            if u.id == rep_user.id:
-                                continue
-                                
-                            u_new_subjects = await self._scrape_user_and_detect(uow, u, current_year, current_semester)
-                            if u_new_subjects:
-                                users_who_got_it.add(u.telegram_id)
-                                if self.notification_service:
-                                    await self.notification_service.send_user(
-                                        u.telegram_id,
-                                        f"🎉 <b>Grade Released!</b>\n\nYour grade for <b>{', '.join(u_new_subjects)}</b> has been released. Use /grades to check it."
-                                    )
-                                    
                         total_users = len(cohort_users_list)
-                        got_it_count = len(users_who_got_it)
                         
-                        # Notify the ones who didn't get it
-                        for u in cohort_users_list:
-                            if u.telegram_id not in users_who_got_it:
-                                if self.notification_service:
-                                    await self.notification_service.send_user(
-                                        u.telegram_id,
-                                        f"⏳ <b>Grade Release Update</b>\n\n{got_it_count} out of {total_users} people in your cohort got a grade for <b>{', '.join(new_subjects)}</b>. Please wait patiently and check again later."
-                                    )
-                                    
+                        for subj in all_new_subjects:
+                            # How many users in this cohort have this subject graded?
+                            total_got_it = sum(1 for u in cohort_users_list if subj in user_graded_subjects.get(u.telegram_id, set()))
+                            got_it_newly = newly_graded_users_per_subject.get(subj, [])
+                            
+                            for u in cohort_users_list:
+                                if u.telegram_id in got_it_newly:
+                                    if self.notification_service:
+                                        await self.notification_service.send_user(
+                                            u.telegram_id,
+                                            f"🎉 <b>Grade Released!</b>\n\nYour grade for <b>{subj}</b> has been released. Use /grades to check it."
+                                        )
+                                elif subj not in user_graded_subjects.get(u.telegram_id, set()):
+                                    if self.notification_service:
+                                        await self.notification_service.send_user(
+                                            u.telegram_id,
+                                            f"⏳ <b>Grade Release Update</b>\n\n{total_got_it} out of {total_users} people in your cohort got a grade for <b>{subj}</b>. Please wait patiently and check again later."
+                                        )
+
                         # Cross-section broadcast
                         sibling_cohorts = await uow.session.scalars(
                             select(CohortState).where(
@@ -306,7 +293,6 @@ class SchedulerService:
                             )
                         )
                         for sib in sibling_cohorts.all():
-                            # Send broadcast to sib representative or all users? Plan said "broadcast to them"
                             sib_users = await uow.session.scalars(
                                 select(User).where(
                                     and_(User.department_id == sib.department_id, User.section == sib.section)
@@ -316,7 +302,7 @@ class SchedulerService:
                                 if self.notification_service:
                                     await self.notification_service.send_user(
                                         su.telegram_id,
-                                        f"📢 <b>Department Update</b>\n\nA grade for <b>{', '.join(new_subjects)}</b> has been released for another section in your department. It might be released for you soon!"
+                                        f"📢 <b>Department Update</b>\n\nA grade for <b>{', '.join(all_new_subjects)}</b> has been released for another section in your department. It might be released for you soon!"
                                     )
                                     
                     scan.status = CohortScanStatus.COMPLETED

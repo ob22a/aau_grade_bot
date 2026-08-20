@@ -32,7 +32,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
         """Starts the broadcast workflow by asking for the message text."""
         await state.clear()
         await state.set_state(AdminBroadcastFSM.message)
-        await message.answer("Send the broadcast text.\n\n<i>(Send /cancel to abort)</i>", parse_mode="HTML")
+        await message.answer("Send the broadcast text.\n\n<i>(Send /cancel to abort)</i>")
 
     @router.message(AdminBroadcastFSM.message)
     async def capture_broadcast(message: Message, state: FSMContext) -> None:
@@ -77,7 +77,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
                 for k, v in snapshot.details.items():
                     msg += f"• {k}: {v}\n"
                     
-            await message.answer(msg, parse_mode="HTML")
+            await message.answer(msg)
         except Exception as exc:
             await message.answer(f"❌ Failed to fetch metrics: {exc}")
 
@@ -112,8 +112,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
                 "/metrics - View bot metrics\n"
                 "/broadcast - Send a broadcast message\n"
                 "/start_service - Enable grade checking service\n"
-                "/stop_service - Disable grade checking service",
-                parse_mode="HTML"
+                "/stop_service - Disable grade checking service"
             )
         except Exception as exc:
             await message.answer(f"❌ Failed to load admin dashboard: {exc}")
@@ -129,7 +128,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
         )
         try:
             result = await services.admin.update_setting(request)
-            await message.answer("✅ Grade checking service <b>ENABLED</b>.", parse_mode="HTML")
+            await message.answer("✅ Grade checking service <b>ENABLED</b>.")
         except Exception as exc:
             await message.answer(f"❌ Failed to enable service: {exc}")
 
@@ -144,7 +143,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
         )
         try:
             result = await services.admin.update_setting(request)
-            await message.answer("🛑 Grade checking service <b>DISABLED</b>.", parse_mode="HTML")
+            await message.answer("🛑 Grade checking service <b>DISABLED</b>.")
         except Exception as exc:
             await message.answer(f"❌ Failed to disable service: {exc}")
 

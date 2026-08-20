@@ -21,8 +21,10 @@ async def main():
         logger.critical("BOT_TOKEN is not set. Please set it in the .env file. Exiting program")
         sys.exit(1)
         
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
     # 1. Initialize Bot
-    bot = Bot(token=settings.bot_token)
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     
     # 2. Build Services and Dispatcher
     services = build_application_services(settings, bot)

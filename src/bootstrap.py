@@ -44,6 +44,12 @@ def build_http_app(settings: Settings, services: ApplicationServices | None = No
             provided = _request.headers.get("X-Admin-Secret", "")
             if not hmac.compare_digest(provided, settings.metrics_secret):
                 return web.Response(status=401)
+        
+        if services and hasattr(services, 'admin'):
+            import dataclasses
+            snapshot = await services.admin.metrics_snapshot()
+            return web.json_response(dataclasses.asdict(snapshot))
+            
         return web.json_response({"status": "ok", "uptime": "available"})
 
     async def cron(_request: web.Request) -> web.Response:
@@ -114,7 +120,7 @@ def build_application_services(
             session_factory=session_factory,
             cipher=cipher,
         ),
-        lifecycle=AccountLifecycleService(notifier=sender, session_factory=session_factory),
+        lifecycle=AccountLifecycleService(notifier=sender, session_factory=session_factory, portal_client=portal_client),
         notification=notification_service,
         scraper=ScraperService(portal_client),
         session_factory=session_factory,

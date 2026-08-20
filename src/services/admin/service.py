@@ -88,8 +88,9 @@ class AdminService:
             from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
             try:
                 async with SqlAlchemyRepositoryUnitOfWork(self.session_factory) as uow:
-                    users = await uow.users.get_all_users()
-                    active_users = len(users)
+                    metrics = await uow.admin.get_system_metrics()
+                    active_users = metrics.get("total_users", 0)
+                    details["users_by_department"] = metrics.get("users_by_department", {})
             except Exception as e:
                 details["db_error"] = str(e)
                 

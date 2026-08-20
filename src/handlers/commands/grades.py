@@ -77,7 +77,7 @@ def build_grades_keyboard(year: str, semester: str, report: Any | None = None, c
         InlineKeyboardButton(text="🔄 Force Refresh", callback_data=f"grade_r:{year}:{semester}")
     ])
     buttons.append([
-        InlineKeyboardButton(text="⬅️ Back", callback_data=f"grade_y:{year}")
+        InlineKeyboardButton(text="📅 Filter by Year/Semester", callback_data="view_grades_filter")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -90,26 +90,70 @@ def build_grades_router(services: ApplicationServices) -> Router:
     @router.message(Command("grades"))
     async def grades(message: Message, state: FSMContext) -> None:
         await state.clear()
+        user_id = message.from_user.id
         if message.from_user:
-            asyncio.create_task(services.lifecycle.bump_last_used(message.from_user.id))
-        kb = build_year_keyboard()
-        await message.answer("Select the <b>Academic Year</b> you want to check:", reply_markup=kb, parse_mode="HTML")
+            asyncio.create_task(services.lifecycle.bump_last_used(user_id))
+        
+        request = GradeReadRequest(telegram_id=user_id, page_index=0)
+        try:
+            result = await services.grades.read(request)
+            if result.message and result.message.startswith("You need to"):
+                await message.answer(result.message)
+            elif not result.message or result.message.startswith("No grades"):
+                kb = build_grades_keyboard("All", "All", None)
+                await message.answer("No grades found.", reply_markup=kb)
+            else:
+                kb = build_grades_keyboard("All", "All", result.report, result.current_page, result.total_pages)
+                await message.answer(result.message, reply_markup=kb)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
+            await message.answer("❌ An error occurred while retrieving your grades. Please try again later.")
 
     @router.callback_query(F.data == "view_grades")
     async def view_grades_callback(query: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
+        user_id = query.from_user.id
         if query.from_user:
-            asyncio.create_task(services.lifecycle.bump_last_used(query.from_user.id))
+            asyncio.create_task(services.lifecycle.bump_last_used(user_id))
+            
+        request = GradeReadRequest(telegram_id=user_id, page_index=0)
+        if query.message:
+            await query.message.edit_text("⏳ Fetching your latest grades...")
+            
+        try:
+            result = await services.grades.read(request)
+            if result.message and result.message.startswith("You need to"):
+                if query.message:
+                    await query.message.edit_text(result.message)
+            elif not result.message or result.message.startswith("No grades"):
+                kb = build_grades_keyboard("All", "All", None)
+                if query.message:
+                    await query.message.edit_text("No grades found.", reply_markup=kb)
+            else:
+                kb = build_grades_keyboard("All", "All", result.report, result.current_page, result.total_pages)
+                if query.message:
+                    await query.message.edit_text(result.message, reply_markup=kb)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
+            if query.message:
+                await query.message.edit_text("❌ An error occurred while retrieving your grades. Please try again later.")
+        await query.answer()
+
+    @router.callback_query(F.data == "view_grades_filter")
+    async def view_grades_filter_callback(query: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
         kb = build_year_keyboard()
         if query.message:
-            await query.message.answer("Select the <b>Academic Year</b> you want to check:", reply_markup=kb, parse_mode="HTML")
+            await query.message.edit_text("Select the <b>Academic Year</b> you want to check:", reply_markup=kb)
         await query.answer()
 
     @router.callback_query(F.data == "grade_back_y")
     async def grade_back_y(query: CallbackQuery) -> None:
         kb = build_year_keyboard()
         if query.message:
-            await query.message.edit_text("Select the <b>Academic Year</b> you want to check:", reply_markup=kb, parse_mode="HTML")
+            await query.message.edit_text("Select the <b>Academic Year</b> you want to check:", reply_markup=kb)
         await query.answer()
 
     @router.callback_query(F.data.startswith("grade_y:"))
@@ -117,7 +161,7 @@ def build_grades_router(services: ApplicationServices) -> Router:
         year = query.data.split(":")[1]
         kb = build_semester_keyboard(year)
         if query.message:
-            await query.message.edit_text(f"Selected: <b>{year}</b>\nNow select the <b>Semester</b>:", reply_markup=kb, parse_mode="HTML")
+            await query.message.edit_text(f"Selected: <b>{year}</b>\nNow select the <b>Semester</b>:", reply_markup=kb)
         await query.answer()
 
     @router.callback_query(F.data.startswith("grade_s:"))
@@ -130,16 +174,18 @@ def build_grades_router(services: ApplicationServices) -> Router:
         request = GradeReadRequest(telegram_id=user_id, year_filter=year, semester_filter=semester, page_index=0)
         
         if query.message:
-            await query.message.edit_text(f"⏳ Fetching grades for {year}, Semester {semester}...", parse_mode="HTML")
+            await query.message.edit_text(f"⏳ Fetching grades for {year}, Semester {semester}...")
             
         try:
             result = await services.grades.read(request)
-            if not result.message or result.message.startswith("No grades"):
+            if result.message and result.message.startswith("You need to"):
+                await query.message.edit_text(result.message)
+            elif not result.message or result.message.startswith("No grades"):
                 kb = build_grades_keyboard(year, semester, None)
                 await query.message.edit_text("No grades found for this selection.", reply_markup=kb)
             else:
                 kb = build_grades_keyboard(year, semester, result.report, result.current_page, result.total_pages)
-                await query.message.edit_text(result.message, parse_mode="HTML", reply_markup=kb)
+                await query.message.edit_text(result.message, reply_markup=kb)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
@@ -161,7 +207,7 @@ def build_grades_router(services: ApplicationServices) -> Router:
             result = await services.grades.read(request)
             kb = build_grades_keyboard(year, semester, result.report, result.current_page, result.total_pages)
             if query.message:
-                await query.message.edit_text(result.message, parse_mode="HTML", reply_markup=kb)
+                await query.message.edit_text(result.message, reply_markup=kb)
         except Exception:
             await query.answer("Failed to load page.", show_alert=True)
         await query.answer()
@@ -188,14 +234,30 @@ def build_grades_router(services: ApplicationServices) -> Router:
             result = await services.grades.read(request)
             if result.report and course_idx < len(result.report.course_grades):
                 cg = result.report.course_grades[course_idx]
+                
+                assessment_text = "No assessment details available."
+                if hasattr(cg, "assessment") and cg.assessment:
+                    try:
+                        if query.message:
+                            await query.message.edit_text("⏳ Fetching assessment details...")
+                        assessment_text = await services.grades.read_assessment(user_id, cg.course_code, cg.assessment)
+                    except Exception as e:
+                        assessment_text = f"Failed to fetch details: {e}"
+
                 details = (
-                    f"📚 {cg.course_code} - {cg.course_name}\n"
+                    f"📚 <b>{cg.course_code} - {cg.course_name}</b>\n"
                     f"Credits: {cg.credit_hours} | ECTS: {cg.ects}\n"
-                    f"Grade: {cg.grade}\n\n"
-                    f"Assessment Details: {cg.assessment}\n"
+                    f"Grade: <code>{cg.grade}</code>\n\n"
+                    f"<b>Assessment Details:</b>\n{assessment_text}\n"
                 )
-                await query.message.answer(details, parse_mode="HTML")
-                await query.answer() # Acknowledge the callback to avoid "loading" state in the UI
+                
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="⬅️ Back to Grades", callback_data=f"grade_p:{year}:{semester}:0")
+                ]])
+                
+                if query.message:
+                    await query.message.edit_text(details, reply_markup=kb)
+                await query.answer() 
             else:
                 await query.answer("Course not found.", show_alert=True)
         except Exception:
@@ -212,12 +274,12 @@ def build_grades_router(services: ApplicationServices) -> Router:
         user_id = query.from_user.id
         request = GradeReadRequest(telegram_id=user_id, force_refresh=True, year_filter=year, semester_filter=semester, page_index=0)
         
-        await query.message.edit_text(f"🔄 Force refreshing grades for {year}, Semester {semester}... Please wait.", parse_mode="HTML")
+        await query.message.edit_text(f"🔄 Force refreshing grades for {year}, Semester {semester}... Please wait.")
         
         try:
             result = await services.grades.read(request)
             kb = build_grades_keyboard(year, semester, result.report, result.current_page, result.total_pages)
-            await query.message.edit_text(result.message, parse_mode="HTML", reply_markup=kb)
+            await query.message.edit_text(result.message, reply_markup=kb)
             await query.answer("Grades refreshed!")
         except Exception as exc:
             import logging

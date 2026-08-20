@@ -410,13 +410,22 @@ def test_grades_command_flow_and_callbacks() -> None:
             await dispatcher.feed_update(bot, Update(update_id=20, message=_make_message("/grades")))
 
             assert replies
-            assert "Select the <b>Academic Year</b>" in replies[0]
+            # /grades now shows grades directly or "No grades" message
+            assert any("grades" in r.lower() or "no grades" in r.lower() for r in replies)
             
+            # Test the filter flow via view_grades_filter callback
+            replies.clear()
+            cq = CallbackQuery(id="1", from_user=types.User(id=99, is_bot=False, first_name="u"), chat_instance="1", data="view_grades_filter", message=_make_message("msg"))
+            with patch.object(Message, "edit_text", fake_edit_text):
+                await dispatcher.feed_update(bot, Update(update_id=21, callback_query=cq))
+            assert replies
+            assert "Select the <b>Academic Year</b>" in replies[0]
+
             # Test selecting a year
             replies.clear()
             cq = CallbackQuery(id="1", from_user=types.User(id=99, is_bot=False, first_name="u"), chat_instance="1", data="grade_y:Year 1", message=_make_message("msg"))
             with patch.object(Message, "edit_text", fake_edit_text):
-                await dispatcher.feed_update(bot, Update(update_id=21, callback_query=cq))
+                await dispatcher.feed_update(bot, Update(update_id=22, callback_query=cq))
             assert replies
             assert "Now select the <b>Semester</b>" in replies[0]
     
@@ -424,8 +433,8 @@ def test_grades_command_flow_and_callbacks() -> None:
             replies.clear()
             cq = CallbackQuery(id="1", from_user=types.User(id=99, is_bot=False, first_name="u"), chat_instance="1", data="grade_s:Year 1:One", message=_make_message("msg"))
             with patch.object(Message, "edit_text", fake_edit_text):
-                await dispatcher.feed_update(bot, Update(update_id=22, callback_query=cq))
-            # The test will return cached grades or "No grades found" depending on cache. Let's just assert it runs without crashing.
+                await dispatcher.feed_update(bot, Update(update_id=23, callback_query=cq))
+            # The test will return cached grades or "No grades found" depending on cache.
             assert len(replies) >= 2 # One for "Fetching grades...", one for the result
     
     asyncio.run(scenario())
@@ -530,12 +539,23 @@ def test_full_database_registration_and_grade_read_service_e2e() -> None:
             async def get_by_user_id(self, user_id):
                 return stored_creds.get(user_id)
 
+        class DummyRepo:
+            async def get_by_user_id(self, *args, **kwargs): return []
+            async def get_by_id(self, *args, **kwargs): return None
+            async def add(self, *args, **kwargs): pass
+            async def delete_by_user_id(self, *args, **kwargs): pass
+
         class DummyUOW:
             def __init__(self):
                 self.session = DummySession()
                 self.users = DummyUsersRepo()
                 self.credentials = DummyCredsRepo()
-
+                self.semester_results = DummyRepo()
+                self.courses = DummyRepo()
+                self.assessments = DummyRepo()
+                self.user_courses = DummyRepo()
+                self.departments = DummyRepo()
+                
             async def __aenter__(self):
                 return self
 
@@ -562,8 +582,7 @@ def test_full_database_registration_and_grade_read_service_e2e() -> None:
                 session_factory=lambda: None,
             )
 
-            # Pre-populate stored user/credentials
-            user_obj = SimpleNamespace(id="user-uuid-1", telegram_id=999, university_id="UGR/1234/16")
+            user_obj = SimpleNamespace(id="user-uuid-1", telegram_id=999, university_id="UGR/1234/16", department_id="SITE")
             encrypted = cipher.encrypt("my_password")
             from crypto.cipher import Ciphertext
             payload = Ciphertext.from_token(encrypted)
