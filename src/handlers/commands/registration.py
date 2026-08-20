@@ -42,6 +42,13 @@ def build_registration_router(services: ApplicationServices) -> Router:
     @router.callback_query(F.data == "register_start")
     async def begin_registration_callback(query: CallbackQuery, state: FSMContext) -> None:
         """Start registration flow from callback."""
+        if query.from_user and await services.lifecycle.is_registered(query.from_user.id):
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👤 My Data", callback_data="my_data")]])
+            await query.answer("You are already registered!", show_alert=True)
+            if query.message:
+                await query.message.answer("You are already registered. Click below to view your data.", reply_markup=kb)
+            return
+
         await state.clear()
         await state.set_state(RegistrationFSM.university_id)
         if query.message:
@@ -54,6 +61,11 @@ def build_registration_router(services: ApplicationServices) -> Router:
     @router.message(Command("register"))
     async def begin_registration(message: Message, state: FSMContext) -> None:
         """Start registration flow, clearing any existing state."""
+        if message.from_user and await services.lifecycle.is_registered(message.from_user.id):
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👤 My Data", callback_data="my_data")]])
+            await message.answer("You are already registered! Click the button below to view or manage your data.", reply_markup=kb)
+            return
+
         await state.clear()
         await state.set_state(RegistrationFSM.university_id)
         await message.answer(

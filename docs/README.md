@@ -1,14 +1,18 @@
 # AAU Grade Bot
 
+[![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/ob22a/aau_grade_bot)
+
 AAU Grade Bot is a Telegram-based grade tracker for AAU students. It logs in to the AAU portal, stores encrypted credentials and academic data, watches for grade changes, and notifies users and administrators through a small set of well-defined handlers and services.
 
-The repository is organized as a layered application:
+This project is fully open-source and located at [github.com/ob22a/aau_grade_bot](https://github.com/ob22a/aau_grade_bot). If you want to use, deploy, or modify this project for your own university or group, you are highly encouraged to fork it!
+
+The repository is organized as a layered application to make modifications easy and safe:
 
 - [`handlers/`](../src/handlers) translate Telegram and HTTP inputs into service calls.
-- [`services/`](../src/services) orchestrate registration, grade reads, scheduler runs, admin actions, and account lifecycle work.
+- [`services/`](../src/services) orchestrate registration, grade reads, scheduler runs, admin actions, and account lifecycle work. (Modify these to change business logic).
 - [`repositories/`](../src/repositories) define persistence contracts and SQLAlchemy implementations.
-- [`clients/`](../src/clients) hold portal and Telegram adapters.
-- [`parser/`](../src/parser) contains safe HTML parsing for AAU pages.
+- [`clients/`](../src/clients) hold portal and Telegram adapters. (Modify `clients/aau_portal_adapter.py` if your portal login flow changes).
+- [`parser/`](../src/parser) contains safe HTML parsing for AAU pages. (Modify these if the HTML structure of the university website changes).
 - [`crypto/`](../src/crypto) encrypts sensitive data at rest.
 - [`docs/`](./) explains how the system works, why it is shaped that way, and how to run it.
 

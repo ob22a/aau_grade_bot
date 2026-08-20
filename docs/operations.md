@@ -2,9 +2,28 @@
 
 ## Endpoints
 
+The bot runs a concurrent web server alongside Telegram polling.
+
 - `GET /` and `GET /health`: return `204 No Content` when the process is alive.
-- `POST /cron`: requires a constant-time comparison of an `X-Cron-Secret` header with `CRON_SECRET`; unauthenticated calls receive `401` and do no work.
-- `GET /metrics`: admin-protected via `X-Admin-Secret`; returns a minimal status payload in the current scaffold.
+
+### Triggering the Cron Job
+- `POST /cron`: This endpoint triggers the background cohort scan. It requires a constant-time comparison of an `X-Cron-Secret` header with the `CRON_SECRET` defined in your `.env`. Unauthenticated calls receive `401` and do no work.
+  
+  **How to run it:**
+  Configure a service like cron-job.org or Render Cron to hit your deployed URL:
+  ```bash
+  curl -X POST https://your-app-url.onrender.com/cron \
+       -H "X-Cron-Secret: your_cron_secret_here"
+  ```
+
+### Viewing Metrics
+- `GET /metrics`: Admin-protected endpoint via `X-Admin-Secret`. It returns a JSON snapshot of the system's current state (active users, scanning progress, etc).
+  
+  **How to run it:**
+  ```bash
+  curl -X GET https://your-app-url.onrender.com/metrics \
+       -H "X-Admin-Secret: your_metrics_secret_here"
+  ```
 
 ## Runtime composition
 
