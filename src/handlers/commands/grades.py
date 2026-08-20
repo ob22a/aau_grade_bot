@@ -242,8 +242,6 @@ def build_grades_router(services: ApplicationServices) -> Router:
                 assessment_text = "No assessment details available."
                 if hasattr(cg, "assessment") and cg.assessment:
                     try:
-                        if query.message:
-                            await query.message.edit_text("⏳ Fetching assessment details...")
                         assessment_text = await services.grades.read_assessment(user_id, cg.course_code, cg.assessment)
                     except Exception as e:
                         assessment_text = f"Failed to fetch details: {e}"
@@ -255,12 +253,8 @@ def build_grades_router(services: ApplicationServices) -> Router:
                     f"<b>Assessment Details:</b>\n{assessment_text}\n"
                 )
                 
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="⬅️ Back to Grades", callback_data=f"grade_p:{year}:{semester}:0")
-                ]])
-                
                 if query.message:
-                    await query.message.edit_text(details, reply_markup=kb)
+                    await query.message.answer(details)
             else:
                 if query.message:
                     await query.message.edit_text("Course not found.")
