@@ -203,14 +203,16 @@ def build_grades_router(services: ApplicationServices) -> Router:
         user_id = query.from_user.id
         request = GradeReadRequest(telegram_id=user_id, year_filter=year, semester_filter=semester, page_index=page_index)
         
+        await query.answer()
+        
         try:
             result = await services.grades.read(request)
             kb = build_grades_keyboard(year, semester, result.report, result.current_page, result.total_pages)
             if query.message:
                 await query.message.edit_text(result.message, reply_markup=kb)
         except Exception:
-            await query.answer("Failed to load page.", show_alert=True)
-        await query.answer()
+            if query.message:
+                await query.message.edit_text("Failed to load page.")
 
     @router.callback_query(F.data.startswith("grade_c:"))
     async def course_details_callback(query: CallbackQuery) -> None:
@@ -229,6 +231,8 @@ def build_grades_router(services: ApplicationServices) -> Router:
 
         user_id = query.from_user.id
         request = GradeReadRequest(telegram_id=user_id, year_filter=year, semester_filter=semester, page_index=0)
+        
+        await query.answer()
         
         try:
             result = await services.grades.read(request)
@@ -257,11 +261,12 @@ def build_grades_router(services: ApplicationServices) -> Router:
                 
                 if query.message:
                     await query.message.edit_text(details, reply_markup=kb)
-                await query.answer() 
             else:
-                await query.answer("Course not found.", show_alert=True)
+                if query.message:
+                    await query.message.edit_text("Course not found.")
         except Exception:
-            await query.answer("Failed to load course details.", show_alert=True)
+            if query.message:
+                await query.message.edit_text("Failed to load course details.")
 
     @router.callback_query(F.data.startswith("grade_r:"))
     async def refresh_callback(query: CallbackQuery) -> None:
@@ -274,13 +279,13 @@ def build_grades_router(services: ApplicationServices) -> Router:
         user_id = query.from_user.id
         request = GradeReadRequest(telegram_id=user_id, force_refresh=True, year_filter=year, semester_filter=semester, page_index=0)
         
+        await query.answer("Scraping portal...")
         await query.message.edit_text(f"🔄 Force refreshing grades for {year}, Semester {semester}... Please wait.")
         
         try:
             result = await services.grades.read(request)
             kb = build_grades_keyboard(year, semester, result.report, result.current_page, result.total_pages)
             await query.message.edit_text(result.message, reply_markup=kb)
-            await query.answer("Grades refreshed!")
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error(f"Error reading grades: {exc}", exc_info=True)
