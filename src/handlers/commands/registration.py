@@ -48,7 +48,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
             await query.message.answer(
                 "Send your AAU university ID in the format UGR/NNNN/YY (e.g., UGR/1234/16).\n\n"
                 "<i>(Send /cancel at any time to abort)</i>",
-                parse_mode="HTML",
             )
         await query.answer()
 
@@ -60,7 +59,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
         await message.answer(
             "Send your AAU university ID in the format UGR/NNNN/YY (e.g., UGR/1234/16).\n\n"
             "<i>(Send /cancel at any time to abort)</i>",
-            parse_mode="HTML",
         )
 
     @router.message(RegistrationFSM.university_id)
@@ -86,7 +84,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
                 "❌ <b>Invalid AAU Student ID format.</b>\n"
                 "Expected format: <code>UGR/NNNN/YY</code> (e.g., <code>UGR/1234/16</code>).\n\n"
                 "Please send a valid ID, or send /cancel to abort.",
-                parse_mode="HTML",
             )
             return
         
@@ -112,7 +109,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
             await message.answer(
                 "Great! Now enter your <b>Section</b> (e.g., 1,2,3):\n\n"
                 "<i>(Send /cancel at any time to abort)</i>",
-                parse_mode="HTML",
                 reply_markup=kb
             )
             return
@@ -122,7 +118,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
         await message.answer(
             "Great! Please select your <b>Campus</b>:\n\n"
             "<i>(Send /cancel at any time to abort)</i>",
-            parse_mode="HTML",
             reply_markup=kb
         )
 
@@ -133,6 +128,50 @@ def build_registration_router(services: ApplicationServices) -> Router:
         await state.update_data(campus=campus_id)
         await query.answer(f"Campus selected: {campus_id}")
         
+        departments_data = []
+        if services.session_factory is not None:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from sqlalchemy import select
+            from database.models import Department
+            async with SqlAlchemyRepositoryUnitOfWork(services.session_factory) as uow:
+                # Fetch departments for this campus
+                depts = await uow.session.scalars(select(Department).where(Department.campus_id == campus_id))
+                departments_data = [{"id": d.department_id, "name": d.full_name} for d in depts]
+                
+        if not departments_data:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Skip Section", callback_data="skip_section")],
+            ])
+            await state.set_state(RegistrationFSM.section)
+            if query.message:
+                await query.message.answer(
+                    "Now enter your <b>Section</b> (e.g., 1,2,3):\n\n"
+                    "<i>(Send /cancel at any time to abort)</i>",
+                    reply_markup=kb
+                )
+            return
+
+        keyboard_buttons = []
+        for d in departments_data:
+            keyboard_buttons.append([InlineKeyboardButton(text=d["name"], callback_data=f"dept_{d['id']}")])
+            
+        keyboard_buttons.append([InlineKeyboardButton(text="Skip Department", callback_data="skip_department")])
+        kb = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        await state.set_state(RegistrationFSM.department)
+        if query.message:
+            await query.message.answer(
+                "Great! Please select your <b>Department</b>:\n\n"
+                "<i>(Send /cancel at any time to abort)</i>",
+                reply_markup=kb
+            )
+
+    @router.callback_query(RegistrationFSM.department, F.data.startswith("dept_"))
+    async def capture_department(query: CallbackQuery, state: FSMContext) -> None:
+        """Capture department selection."""
+        dept_id = query.data.split("_", 1)[1]
+        await state.update_data(department_id=dept_id)
+        await query.answer("Department selected.")
+        
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Skip Section", callback_data="skip_section")],
         ])
@@ -141,7 +180,23 @@ def build_registration_router(services: ApplicationServices) -> Router:
             await query.message.answer(
                 "Now enter your <b>Section</b> (e.g., 1,2,3):\n\n"
                 "<i>(Send /cancel at any time to abort)</i>",
-                parse_mode="HTML",
+                reply_markup=kb
+            )
+
+    @router.callback_query(RegistrationFSM.department, F.data == "skip_department")
+    async def skip_department_callback(query: CallbackQuery, state: FSMContext) -> None:
+        """Skip department input and proceed to section."""
+        await query.answer("Department skipped.")
+        
+        await state.update_data(department_id=None)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Skip Section", callback_data="skip_section")],
+        ])
+        await state.set_state(RegistrationFSM.section)
+        if query.message:
+            await query.message.answer(
+                "Now enter your <b>Section</b> (e.g., 1,2,3):\n\n"
+                "<i>(Send /cancel at any time to abort)</i>",
                 reply_markup=kb
             )
 
@@ -156,7 +211,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
             await query.message.answer(
                 "Now send your <b>AAU Portal Password</b>.\n\n"
                 "<i>(Send /cancel at any time to abort)</i>",
-                parse_mode="HTML",
             )
     
 
@@ -182,7 +236,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
                 "❌ <b>Invalid Section format.</b>\n"
                 "Section should be a number (e.g., 1, 2, 3).\n\n"
                 "Please send a valid section, or send /cancel to abort.",
-                parse_mode="HTML",
             )
             return
 
@@ -192,7 +245,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
         await message.answer(
             "Now send your <b>AAU Portal Password</b>.\n\n"
             "<i>(Send /cancel at any time to abort)</i>",
-            parse_mode="HTML",
         )
 
     @router.message(RegistrationFSM.password)
@@ -222,12 +274,14 @@ def build_registration_router(services: ApplicationServices) -> Router:
         await state.set_state(RegistrationFSM.confirm)
         
         campus_id = data.get("campus", "Not specified")
+        dept_id = data.get("department_id", "Not specified")
         section = data.get("section", "Not specified")
         
         msg = (
             "📋 <b>Registration Summary</b>\n\n"
             f"<b>University ID:</b> <code>{data.get('university_id')}</code>\n"
             f"<b>Campus:</b> {campus_id}\n"
+            f"<b>Department:</b> {dept_id}\n"
             f"<b>Section:</b> {section}\n"
             f"<b>Password:</b> <tg-spoiler>{text}</tg-spoiler>\n\n"
             "Is this information correct?"
@@ -237,11 +291,12 @@ def build_registration_router(services: ApplicationServices) -> Router:
             [InlineKeyboardButton(text="✅ Confirm & Register", callback_data="confirm_registration")],
             [InlineKeyboardButton(text="✏️ Edit Password", callback_data="edit_password")],
             [InlineKeyboardButton(text="✏️ Edit Section", callback_data="edit_section")],
+            [InlineKeyboardButton(text="✏️ Edit Department", callback_data="edit_department")],
             [InlineKeyboardButton(text="✏️ Edit Campus", callback_data="edit_campus")],
             [InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_registration")]
         ])
         
-        await message.answer(msg, parse_mode="HTML", reply_markup=kb)
+        await message.answer(msg, reply_markup=kb)
 
     @router.callback_query(RegistrationFSM.confirm, F.data == "cancel_registration")
     async def confirm_cancel(query: CallbackQuery, state: FSMContext) -> None:
@@ -286,8 +341,38 @@ def build_registration_router(services: ApplicationServices) -> Router:
             await query.message.answer("Please select your Campus:", reply_markup=kb)
         await query.answer()
 
+    @router.callback_query(RegistrationFSM.confirm, F.data == "edit_department")
+    async def confirm_edit_department(query: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        campus_id = data.get("campus")
+        
+        departments_data = []
+        if services.session_factory is not None and campus_id:
+            from repositories.sqlalchemy.unit_of_work import SqlAlchemyRepositoryUnitOfWork
+            from sqlalchemy import select
+            from database.models import Department
+            async with SqlAlchemyRepositoryUnitOfWork(services.session_factory) as uow:
+                depts = await uow.session.scalars(select(Department).where(Department.campus_id == campus_id))
+                departments_data = [{"id": d.department_id, "name": d.full_name} for d in depts]
+                
+        keyboard_buttons = []
+        for d in departments_data:
+            keyboard_buttons.append([InlineKeyboardButton(text=d["name"], callback_data=f"dept_{d['id']}")])
+        keyboard_buttons.append([InlineKeyboardButton(text="Skip Department", callback_data="skip_department")])
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        await state.set_state(RegistrationFSM.department)
+        if query.message:
+            await query.message.answer("Please select your Department:", reply_markup=kb)
+        await query.answer()
+
     @router.callback_query(RegistrationFSM.confirm, F.data == "confirm_registration")
     async def confirm_register(query: CallbackQuery, state: FSMContext) -> None:
+        try:
+            await query.answer()
+        except Exception:
+            pass
+            
         data = await state.get_data()
         
         request = RegistrationRequest(
@@ -295,17 +380,18 @@ def build_registration_router(services: ApplicationServices) -> Router:
             university_id=data.get("university_id", ""),
             password=data.get("password", ""),
             campus=data.get("campus"),
+            department_id=data.get("department_id"),
             section=str(data.get("section")) if data.get("section") is not None else None,
         )
 
         if query.message:
-            await query.message.edit_text("⏳ <b>Authenticating with AAU portal... Please wait.</b>", parse_mode="HTML")
+            await query.message.edit_text("⏳ <b>Authenticating with AAU portal... Please wait.</b>")
             
         try:
             outcome = await services.registration.register(request)
             await state.clear()
             if query.message:
-                await query.message.answer(outcome.result.message, parse_mode="HTML")
+                await query.message.answer(outcome.result.message)
                 from handlers.commands.my_data import show_my_data_logic
                 await show_my_data_logic(query.message, services, user_id=query.from_user.id)
         except PortalAuthenticationError:
@@ -314,7 +400,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
                 await query.message.answer(
                     "❌ <b>Registration failed:</b> Invalid AAU username or password.\n"
                     "Please verify your portal credentials and use /register to try again.",
-                    parse_mode="HTML",
                 )
         except PortalLockoutRiskError as exc:
             await state.clear()
@@ -322,7 +407,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
                 await query.message.answer(
                     f"⚠️ <b>Registration paused for safety:</b>\n{exc}\n\n"
                     "Please wait a few minutes and verify your password at portal.aau.edu.et before trying again.",
-                    parse_mode="HTML",
                 )
         except PortalTimeoutError:
             await state.clear()
@@ -330,14 +414,12 @@ def build_registration_router(services: ApplicationServices) -> Router:
                 await query.message.answer(
                     "⏳ <b>Connection Timeout:</b> The AAU portal timed out while processing your request. "
                     "The portal may be slow or temporarily unresponsive. Please try again in a few minutes.",
-                    parse_mode="HTML",
                 )
         except PortalUnavailableError:
             await state.clear()
             if query.message:
                 await query.message.answer(
                     "⚠️ <b>Portal Unavailable:</b> The AAU portal is currently down or unreachable. Please try again later.",
-                    parse_mode="HTML",
                 )
         except PortalSchemaChangedError as exc:
             await state.clear()
@@ -360,7 +442,6 @@ def build_registration_router(services: ApplicationServices) -> Router:
             if query.message:
                 await query.message.answer(
                     "⚠️ <b>Portal Layout Changed:</b> The AAU portal layout has changed. An administrator has been notified. Please try again later.",
-                    parse_mode="HTML",
                 )
         except ValueError as exc:
             await state.clear()
@@ -375,6 +456,5 @@ def build_registration_router(services: ApplicationServices) -> Router:
             logger.error("Unexpected error during registration", exc_info=exc)
             if query.message:
                 await query.message.answer("⚠️ An unexpected error occurred. Please try again later.")
-        await query.answer()
 
     return router

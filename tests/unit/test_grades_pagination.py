@@ -69,4 +69,4 @@ def test_build_grades_keyboard_courses() -> None:
     assert len(keyboard.inline_keyboard) == 3
     assert keyboard.inline_keyboard[0][0].callback_data == "grade_c:2025/26:One:0"
     assert keyboard.inline_keyboard[1][0].callback_data == "grade_r:2025/26:One"
-    assert keyboard.inline_keyboard[2][0].callback_data == "grade_y:2025/26"
+    assert keyboard.inline_keyboard[2][0].callback_data == "view_grades_filter"

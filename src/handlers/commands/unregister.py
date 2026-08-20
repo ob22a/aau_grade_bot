@@ -17,6 +17,10 @@ def build_unregister_router(services: ApplicationServices) -> Router:
     @router.message(Command("unregister"))
     async def handle_unregister_command(message: Message) -> None:
         """Prompt the user for confirmation before deleting their account."""
+        if not await services.lifecycle.is_registered(message.from_user.id):
+            await message.reply("You are not registered in the system.")
+            return
+
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -30,8 +34,7 @@ def build_unregister_router(services: ApplicationServices) -> Router:
             "⚠️ <b>Account Deletion</b>\n\n"
             "Are you sure you want to delete your account? This will permanently remove your portal credentials and all cached grades from our database.\n\n"
             "This action cannot be undone.",
-            reply_markup=keyboard,
-            parse_mode="HTML"
+            reply_markup=keyboard
         )
 
     @router.callback_query(F.data == "confirm_unregister")
@@ -43,7 +46,12 @@ def build_unregister_router(services: ApplicationServices) -> Router:
         request = AccountDeletionRequest(telegram_id=callback_query.from_user.id, confirm=True)
         result = await services.lifecycle.request_deletion(request)
         
-        await callback_query.message.edit_text(result.message)
+        from aiogram.exceptions import TelegramBadRequest
+        from contextlib import suppress
+        
+        with suppress(TelegramBadRequest):
+            await callback_query.message.edit_text(result.message)
+            
         await callback_query.answer()
 
     @router.callback_query(F.data == "cancel_unregister")

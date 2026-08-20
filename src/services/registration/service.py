@@ -122,16 +122,14 @@ class RegistrationService:
                         db_user = await uow.users.get_by_telegram_id(request.telegram_id)
                     
                         # Resolve department
-                        dept_id = None
-                        if profile and profile.profile and profile.profile.department:
-                            from sqlalchemy import select
+                        dept_id = request.department_id
+                        
+                        if not dept_id and profile and profile.profile and profile.profile.department:
                             dept_name = profile.profile.department
-                            stmt = select(Department).where(Department.full_name == dept_name)
-                            if request.campus:
-                                stmt = stmt.where(Department.campus_id == request.campus)
-                            dept = await uow.session.scalar(stmt)
+                            dept = await uow.departments.get_by_name(dept_name)
                             if dept:
                                 dept_id = dept.department_id
+
 
                         if db_user is None:
                             db_user = User(
@@ -191,7 +189,7 @@ class RegistrationService:
                             await uow.session.execute(delete(SemesterResult).where(SemesterResult.user_id == db_user.id))
 
                             for rep in _grade_report:
-                                sem = parse_semester(rep.semester)
+                                sem = parse_semester(rep.semester_label)
                             
                                 # Serialize GradeReport to JSON
                                 rep_dict = rep.model_dump()
@@ -212,7 +210,7 @@ class RegistrationService:
                                 # Save Courses, UserCourses, and Assessments
                                 for cg in rep.course_grades:
                                     # Ensure Course exists
-                                    course_db = await uow.session.scalar(select(Course).where(Course.course_id == cg.course_code))
+                                    course_db = await uow.courses.get_by_id(cg.course_code)
                                     if not course_db:
                                         course_db = Course(
                                             course_id=cg.course_code,
@@ -220,8 +218,22 @@ class RegistrationService:
                                             credit_hours=int(cg.credit_hours) if cg.credit_hours else 0,
                                             ects=int(cg.ects) if cg.ects else 0,
                                         )
-                                        uow.session.add(course_db)
+                                        await uow.courses.add(course_db)
                                         await uow.session.flush()
+                                        
+                                    if dept_id:
+                                        from database.models import DepartmentCourse
+                                        dc_stmt = select(DepartmentCourse).where(
+                                            DepartmentCourse.department_id == dept_id,
+                                            DepartmentCourse.course_id == course_db.course_id
+                                        )
+                                        dc_db = await uow.session.scalar(dc_stmt)
+                                        if not dc_db:
+                                            dc_db = DepartmentCourse(
+                                                department_id=dept_id,
+                                                course_id=course_db.course_id
+                                            )
+                                            uow.session.add(dc_db)
 
                                     # Create or update UserCourse
                                     uc_stmt = select(UserCourse).where(
@@ -266,56 +278,20 @@ class RegistrationService:
                                         asm_db.iv = asm_iv
 
                         await uow.commit()
-                except Exception as db_exc:
-                    import logging
-                    logging.getLogger(__name__).warning(f"Registration DB persistence warning: {db_exc}")
+                except Exception:
+                    raise
 
             if self.cache is not None:
                 await self.cache.set(f"registration:{request.telegram_id}", "1", ttl_seconds=300)
 
-            # Format auto-display message
-            grade_message = ""
-            if _grade_report:
-                from services.grades.service import format_grade_report_page
-                # Auto-display the first (most recent) term
-                rep = _grade_report[0]
-            
-                course_dicts = []
-                for cg in rep.course_grades:
-                    course_dicts.append({
-                        "course_code": cg.course_code,
-                        "course_name": cg.course_name,
-                        "credit_hours": cg.credit_hours,
-                        "ects": cg.ects,
-                        "grade": cg.grade,
-                    })
-            
-                summary_dict = None
-                if rep.summary:
-                    summary_dict = {
-                        "sgp": rep.summary.sgp,
-                        "sgpa": rep.summary.sgpa,
-                        "cgpa": rep.summary.cgpa,
-                        "academic_status": rep.summary.academic_status,
-                    }
-                
-                formatted = format_grade_report_page(
-                academic_year=rep.academic_year,
-                semester_label=rep.semester_label,
-                year_label=rep.year_label,
-                course_grades=course_dicts,
-                summary=summary_dict,
-            )
-            grade_message = f"\n\n{formatted}"
-
+            resolved_dept = request.department_id or (profile.profile.department if profile and profile.profile else 'Unknown')
             return RegistrationOutcome(
                 profile=profile,
                 result=RegistrationResult(
                     success=True, 
                     message=f"✅ <b>Registration complete!</b>\n\n"
                             f"University ID: <code>{university_id}</code>\n"
-                            f"Department: <code>{profile.profile.department or 'Unknown'}</code>"
-                            f"{grade_message}"
+                            f"Department: <code>{resolved_dept}</code>"
                 ),
             )
         finally:

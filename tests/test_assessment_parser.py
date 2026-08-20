@@ -72,7 +72,7 @@ def test_missing_table_body_raises_schema_error():
     </html>
     """
 
-    with pytest.raises(PortalSchemaChangedError):
+    with pytest.raises(PortalDataValidationError):
         parse_assessment_details(html)
 
 
