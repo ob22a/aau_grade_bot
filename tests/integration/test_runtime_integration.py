@@ -1,6 +1,7 @@
 """Integration tests for bootstrap HTTP endpoints and Telegram dispatcher flow."""
 
 from __future__ import annotations
+import os
 
 import asyncio
 from dataclasses import dataclass
@@ -50,6 +51,9 @@ class DummyAdminService:
 
     async def update_setting(self, request):
         return SimpleNamespace(message="Setting updated")
+
+    async def get_all_settings(self):
+        return {}
 
     async def metrics_snapshot(self):
         return SimpleNamespace(uptime_seconds=123, scrape_attempts=4, scrape_failures=1)
@@ -194,7 +198,7 @@ def test_http_endpoints_enforce_secrets_and_health() -> None:
 def test_registration_flow_reaches_service_and_returns_messages() -> None:
     async def scenario() -> None:
         services = _application_services()
-        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        settings = Settings(encryption_key=AesGcmCipher.generate_key(), redis_url=None)
         dispatcher = build_dispatcher(settings, services)
         bot = Bot(token="123:FAKE")
         replies: list[str] = []
@@ -243,7 +247,7 @@ def test_registration_command_interception_cancels_state() -> None:
     """Verify that sending a command (like /start or /cancel) mid-registration cancels the pending state."""
     async def scenario() -> None:
         services = _application_services()
-        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        settings = Settings(encryption_key=AesGcmCipher.generate_key(), redis_url=None)
         dispatcher = build_dispatcher(settings, services)
         bot = Bot(token="123:FAKE")
         replies: list[str] = []
@@ -272,7 +276,7 @@ def test_registration_invalid_student_id_format_retries() -> None:
     """Verify that invalid student ID format shows helpful guidance without clearing state."""
     async def scenario() -> None:
         services = _application_services()
-        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        settings = Settings(encryption_key=AesGcmCipher.generate_key(), redis_url=None)
         dispatcher = build_dispatcher(settings, services)
         bot = Bot(token="123:FAKE")
         replies: list[str] = []
@@ -303,7 +307,7 @@ def test_registration_auth_error_displays_friendly_message_and_clears_state() ->
         # Mock registration to fail with auth error
         services.registration.register = AsyncMock(side_effect=PortalAuthenticationError("Invalid creds"))
 
-        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        settings = Settings(encryption_key=AesGcmCipher.generate_key(), redis_url=None)
         dispatcher = build_dispatcher(settings, services)
         bot = Bot(token="123:FAKE")
         replies: list[str] = []
@@ -390,7 +394,7 @@ def test_grades_command_flow_and_callbacks() -> None:
         from aiogram import types
 
         services = _application_services()
-        settings = Settings(encryption_key=AesGcmCipher.generate_key())
+        settings = Settings(encryption_key=AesGcmCipher.generate_key(), redis_url=None)
         dispatcher = build_dispatcher(settings, services)
         bot = Bot(token="123:FAKE")
         replies: list[str] = []

@@ -113,7 +113,9 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
                 "/metrics - View bot metrics\n"
                 "/broadcast - Send a broadcast message\n"
                 "/start_service - Enable grade checking service\n"
-                "/stop_service - Disable grade checking service"
+                "/stop_service - Disable grade checking service\n"
+                "/maintenance_on - Enable maintenance mode\n"
+                "/maintenance_off - Disable maintenance mode"
             )
         except Exception as exc:
             await message.answer(f"❌ Failed to load admin dashboard: {html.escape(str(exc))}")
@@ -164,5 +166,35 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             await message.answer("🛑 Grade checking service <b>DISABLED</b>.")
         except Exception as exc:
             await message.answer(f"❌ Failed to disable service: {html.escape(str(exc))}")
+
+    @router.message(Command("maintenance_on"))
+    async def cmd_maintenance_on(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        request = SettingsUpdateRequest(
+            admin_telegram_id=message.from_user.id if message.from_user else 0,
+            key="is_maintenance_mode",
+            value="true",
+            confirm=True,
+        )
+        try:
+            await services.admin.update_setting(request)
+            await message.answer("✅ Maintenance mode <b>ENABLED</b>. Normal users are blocked.")
+        except Exception as exc:
+            await message.answer(f"❌ Failed to enable maintenance mode: {html.escape(str(exc))}")
+
+    @router.message(Command("maintenance_off"))
+    async def cmd_maintenance_off(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        request = SettingsUpdateRequest(
+            admin_telegram_id=message.from_user.id if message.from_user else 0,
+            key="is_maintenance_mode",
+            value="false",
+            confirm=True,
+        )
+        try:
+            await services.admin.update_setting(request)
+            await message.answer("✅ Maintenance mode <b>DISABLED</b>. Normal users can use the bot.")
+        except Exception as exc:
+            await message.answer(f"❌ Failed to disable maintenance mode: {html.escape(str(exc))}")
 
     return router

@@ -135,7 +135,9 @@ def build_dispatcher(settings: Settings, services: ApplicationServices) -> Dispa
     dispatcher = Dispatcher(storage=storage)
     
     from handlers.middlewares.logging import LoggingMiddleware
+    from handlers.middlewares.maintenance import MaintenanceMiddleware
     dispatcher.update.middleware(LoggingMiddleware())
+    dispatcher.update.middleware(MaintenanceMiddleware(settings, services))
     
     dispatcher.include_router(build_start_router(settings, services))
     dispatcher.include_router(build_registration_router(services))
