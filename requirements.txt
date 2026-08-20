@@ -12,3 +12,4 @@ cryptography
 redis
 aiosqlite
 pytest-asyncio
+psutil

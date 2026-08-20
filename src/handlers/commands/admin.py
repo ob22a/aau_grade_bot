@@ -56,7 +56,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             await message.answer(result.message)
         except Exception as exc:
             await state.clear()
-            await message.answer(f"❌ Broadcast failed: {exc}")
+            await message.answer(f"❌ Broadcast failed: {html.escape(str(exc))}")
 
     @router.message(Command("metrics"))
     async def metrics(message: Message, state: FSMContext) -> None:
@@ -75,18 +75,18 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             if snapshot.details:
                 msg += f"\n<b>Details:</b>\n"
                 for k, v in snapshot.details.items():
-                    msg += f"• {k}: {v}\n"
+                    msg += f"• {html.escape(str(k))}: {html.escape(str(v))}\n"
                     
             await message.answer(msg)
         except Exception as exc:
-            await message.answer(f"❌ Failed to fetch metrics: {exc}")
+            await message.answer(f"❌ Failed to fetch metrics: {html.escape(str(exc))}")
 
     @router.message(Command("setsetting"))
     async def set_setting(message: Message, state: FSMContext) -> None:
         await state.clear()
         parts = (message.text or "").split(maxsplit=2)
         if len(parts) < 3:
-            await message.answer("Usage: /setsetting <key> <value>")
+            await message.answer("Usage: /setsetting &lt;key&gt; &lt;value&gt;")
             return
         request = SettingsUpdateRequest(
             admin_telegram_id=message.from_user.id if message.from_user else 0,
@@ -98,7 +98,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             result = await services.admin.update_setting(request)
             await message.answer(result.message)
         except Exception as exc:
-            await message.answer(f"❌ Failed to update setting: {exc}")
+            await message.answer(f"❌ Failed to update setting: {html.escape(str(exc))}")
 
     @router.message(Command("admin"))
     async def cmd_admin(message: Message, state: FSMContext) -> None:
@@ -108,14 +108,14 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             await message.answer(
                 f"🛠 <b>Admin Dashboard</b>\n\n"
                 "Commands:\n"
-                "/setsetting <key> <value> - Update a setting\n"
+                "/setsetting &lt;key&gt; &lt;value&gt; - Update a setting\n"
                 "/metrics - View bot metrics\n"
                 "/broadcast - Send a broadcast message\n"
                 "/start_service - Enable grade checking service\n"
                 "/stop_service - Disable grade checking service"
             )
         except Exception as exc:
-            await message.answer(f"❌ Failed to load admin dashboard: {exc}")
+            await message.answer(f"❌ Failed to load admin dashboard: {html.escape(str(exc))}")
 
     @router.message(Command("start_service"))
     async def cmd_start_service(message: Message, state: FSMContext) -> None:
@@ -130,7 +130,7 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             result = await services.admin.update_setting(request)
             await message.answer("✅ Grade checking service <b>ENABLED</b>.")
         except Exception as exc:
-            await message.answer(f"❌ Failed to enable service: {exc}")
+            await message.answer(f"❌ Failed to enable service: {html.escape(str(exc))}")
 
     @router.message(Command("stop_service"))
     async def cmd_stop_service(message: Message, state: FSMContext) -> None:
@@ -145,6 +145,6 @@ def build_admin_router(settings: Settings, services: ApplicationServices) -> Rou
             result = await services.admin.update_setting(request)
             await message.answer("🛑 Grade checking service <b>DISABLED</b>.")
         except Exception as exc:
-            await message.answer(f"❌ Failed to disable service: {exc}")
+            await message.answer(f"❌ Failed to disable service: {html.escape(str(exc))}")
 
     return router

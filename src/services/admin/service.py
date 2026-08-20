@@ -92,7 +92,8 @@ class AdminService:
                     active_users = metrics.get("total_users", 0)
                     details["users_by_department"] = metrics.get("users_by_department", {})
             except Exception as e:
-                details["db_error"] = str(e)
+                import html
+                details["db_error"] = html.escape(str(e))
                 
         import time
         import psutil

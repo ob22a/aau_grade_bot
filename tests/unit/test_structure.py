@@ -89,7 +89,8 @@ def test_http_app_builds() -> None:
 
 def test_router_builders_return_objects() -> None:
     services = _services()
-    assert build_start_router(services) is not None
+    settings = Settings(bot_token="test", encryption_key="test", database_url="test")
+    assert build_start_router(settings, services) is not None
     assert build_registration_router(services) is not None
     assert build_grades_router(services) is not None
     assert build_admin_router(Settings(), services) is not None
