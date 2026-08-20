@@ -38,3 +38,8 @@ class SqlAlchemyUserRepository:
         statement = select(User)
         result = await self.session.execute(statement)
         return list(result.scalars().all())
+
+    async def get_inactive_users(self, threshold_date) -> list[User]:
+        statement = select(User).where(User.last_used < threshold_date)
+        result = await self.session.execute(statement)
+        return list(result.scalars().all())

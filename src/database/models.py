@@ -130,6 +130,10 @@ class UserCredential(Base):
         String(50),
         default="AES-256-GCM"
     )
+    
+    is_valid: Mapped[bool] = mapped_column(default=True)
+    failed_attempts: Mapped[int] = mapped_column(default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

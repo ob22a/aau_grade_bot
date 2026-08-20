@@ -47,19 +47,9 @@ def parse_assessment_details(html: str) -> AssessmentDetailsResult:
         )
 
     tbody = modal_table.find("tbody")
-    if not tbody:
-        diagnostic = SchemaChangeDiagnostic(
-            page_type="assessment",
-            detected_element="table body",
-            expected_selector="tbody inside modal table",
-            detail="Assessment table body missing"
-        )
-        raise PortalSchemaChangedError(
-            f"Assessment table body not found. {diagnostic.detail}",
-            diagnostic
-        )
+    container = tbody if tbody else modal_table
 
-    rows = tbody.find_all("tr")
+    rows = container.find_all("tr")
     if not rows:
         raise PortalDataValidationError("No rows found in assessment table")
 

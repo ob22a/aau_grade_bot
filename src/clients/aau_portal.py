@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from parser.models import GradeReport, ParsedPortalResult, ProfilePageResult
+from parser.models import GradeReport, ParsedPortalResult, ProfilePageResult, AssessmentDetailsResult
 
 
 @dataclass(frozen=True)
@@ -58,4 +58,16 @@ class PortalClient(Protocol):
         student_id: str,
     ) -> tuple[ProfilePageResult, tuple[GradeReport, ...]]:
         """Scrape the portal for a single student and return stable DTOs."""
+        raise NotImplementedError()
+
+    async def scrape_assessment(
+        self,
+        username: str,
+        password: str,
+        student_id: str,
+        academic_year_id: str,
+        semester_id: str,
+        course_id: str,
+    ) -> AssessmentDetailsResult:
+        """Fetch and parse detailed assessment scores for a specific course."""
         raise NotImplementedError()

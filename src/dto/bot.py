@@ -11,6 +11,7 @@ class RegistrationRequest:
     university_id: str
     password: str
     campus: str | None = None
+    department_id: str | None = None
     section: str | None = None
 
 

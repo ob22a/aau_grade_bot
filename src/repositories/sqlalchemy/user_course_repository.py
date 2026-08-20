@@ -25,3 +25,8 @@ class SqlAlchemyUserCourseRepository:
 
     async def remove(self, user_course: UserCourse) -> None:
         await self.session.delete(user_course)
+
+    async def delete_by_user_id(self, user_id: str) -> None:
+        from sqlalchemy import delete
+        statement = delete(UserCourse).where(UserCourse.user_id == user_id)
+        await self.session.execute(statement)

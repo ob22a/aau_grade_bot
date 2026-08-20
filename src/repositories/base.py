@@ -19,6 +19,9 @@ class UnitOfWork(Protocol):
     user_courses: UserCourseRepository
     assessments: AssessmentRepository
     semester_results: SemesterResultRepository
+    departments: DepartmentRepository
+    courses: CourseRepository
+    admin: AdminRepository
 
     async def __aenter__(self) -> UnitOfWork:
         ...
@@ -59,6 +62,23 @@ class UserRepository(Repository, Protocol):
 
 class CampusRepository(Repository, Protocol):
     async def get_all(self) -> list[object]:
+        ...
+
+class DepartmentRepository(Repository, Protocol):
+    async def get_by_id(self, department_id: str) -> object | None:
+        ...
+
+    async def get_by_name(self, full_name: str) -> object | None:
+        ...
+
+    async def add(self, department: object) -> None:
+        ...
+
+class CourseRepository(Repository, Protocol):
+    async def get_by_id(self, course_id: str) -> object | None:
+        ...
+
+    async def add(self, course: object) -> None:
         ...
 
 class UserCredentialRepository(Repository, Protocol):
@@ -124,3 +144,9 @@ class CronRunRepository(Repository, Protocol):
 
     async def get_by_id(self, run_id: str) -> object | None:
         ...
+
+
+class AdminRepository(Repository, Protocol):
+    async def get_system_metrics(self) -> dict:
+        ...
+

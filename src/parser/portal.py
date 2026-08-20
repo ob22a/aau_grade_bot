@@ -6,7 +6,7 @@ from typing import Iterable
 from bs4 import BeautifulSoup
 
 from clients.aau_portal import PortalDataValidationError, PortalSchemaChangedError, SchemaChangeDiagnostic
-from parser.models import AssessmentReference, CourseGrade, GradeReport, GradeReportSummary
+from parser.models import AssessmentReference, CourseGrade, GradeReport, GradeReportSummary, AssessmentDetailsResult, AssessmentDetails, AssessmentScore
 from utils.html_cleaner import cleanup_html
 
 
@@ -120,17 +120,22 @@ def _find_grade_rows(rows: Iterable[BeautifulSoup]) -> list[BeautifulSoup]:
 
 def parse_grade_report(html: str) -> tuple[GradeReport, ...]:
     document = BeautifulSoup(html, "html.parser")
-    table = document.select_one("table#grade-report")
-    if table is None:
-        table = document.select_one("table.table-bordered")
+    
+    # The most reliable identifier for the grade report table is the presence of 'yrsm' rows
+    yrsm_row = document.find("tr", class_="yrsm")
+    if yrsm_row:
+        table = yrsm_row.find_parent("table")
+    else:
+        table = None
+        
     if table is None:
         raise PortalSchemaChangedError(
             "AAU grade report table changed",
             SchemaChangeDiagnostic(
                 page_type="grade_report",
                 detected_element="grade report table",
-                expected_selector="table#grade-report or table.table-bordered",
-                detail="Grade report table not found",
+                expected_selector="table containing tr.yrsm",
+                detail="Grade report table not found or contains no academic year rows",
                 html_snippet=cleanup_html(html)
             )
         )
@@ -178,3 +183,4 @@ def parse_grade_report(html: str) -> tuple[GradeReport, ...]:
         raise PortalDataValidationError("No grade report sections found")
 
     return tuple(reports)
+

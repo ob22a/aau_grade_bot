@@ -18,6 +18,9 @@ from .user_course_repository import SqlAlchemyUserCourseRepository
 from .assessment_repository import SqlAlchemyAssessmentRepository
 from .semester_result_repository import SqlAlchemySemesterResultRepository
 from .campus_repository import SqlAlchemyCampusRepository
+from .department_repository import SqlAlchemyDepartmentRepository
+from .course_repository import SqlAlchemyCourseRepository
+from .admin_repository import SqlAlchemyAdminRepository
 
 SessionFactory = Callable[[], AsyncSession]
 
@@ -37,6 +40,9 @@ class SqlAlchemyRepositoryUnitOfWork:
         self.user_courses: SqlAlchemyUserCourseRepository | None = None
         self.assessments: SqlAlchemyAssessmentRepository | None = None
         self.semester_results: SqlAlchemySemesterResultRepository | None = None
+        self.departments: SqlAlchemyDepartmentRepository | None = None
+        self.courses: SqlAlchemyCourseRepository | None = None
+        self.admin: SqlAlchemyAdminRepository | None = None
 
     async def __aenter__(self) -> Self:
         await self._base_uow.__aenter__()
@@ -53,6 +59,9 @@ class SqlAlchemyRepositoryUnitOfWork:
         self.user_courses = SqlAlchemyUserCourseRepository(self.session)
         self.assessments = SqlAlchemyAssessmentRepository(self.session)
         self.semester_results = SqlAlchemySemesterResultRepository(self.session)
+        self.departments = SqlAlchemyDepartmentRepository(self.session)
+        self.courses = SqlAlchemyCourseRepository(self.session)
+        self.admin = SqlAlchemyAdminRepository(self.session)
 
         return self
 
@@ -79,3 +88,5 @@ class SqlAlchemyRepositoryUnitOfWork:
         self.user_courses = None
         self.assessments = None
         self.semester_results = None
+        self.departments = None
+        self.courses = None

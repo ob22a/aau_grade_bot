@@ -21,7 +21,8 @@ from clients.aau_portal import (
 from config import Settings
 from parser.home import parse_profile_page
 from parser.portal import parse_grade_report
-from parser.models import GradeReport, ProfilePageResult
+from parser.assessment import parse_assessment_details
+from parser.models import GradeReport, ProfilePageResult, AssessmentDetailsResult
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,55 @@ class AAUPortalClient(PortalClient):
                 if self.session:
                     await self.session.close()
                     logger.debug("HTTP session closed")
+
+    async def scrape_assessment(
+        self, username: str, password: str, student_id: str, academic_year_id: str, semester_id: str, course_id: str
+    ) -> AssessmentDetailsResult:
+        """Fetch and parse detailed assessment scores for a specific course."""
+        async with self.semaphore:
+            self._validate_student_id(student_id)
+
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                }
+                self.session = aiohttp.ClientSession(headers=headers)
+                
+                token = await self._fetch_verification_token()
+                auth_result = await self._login(username, password, token, student_id)
+                if auth_result["status"] != "SUCCESS":
+                    self._handle_auth_failure(auth_result)
+
+                # POST to assessment endpoint
+                data = {
+                    "academicYearId": academic_year_id,
+                    "semesterId": semester_id,
+                    "courseId": course_id
+                }
+                
+                async with self.session.post(
+                    f"{self.BASE_URL}{self.ASSESSMENT_ENDPOINT}",
+                    data=data,
+                    timeout=aiohttp.ClientTimeout(total=self.settings.portal_timeout_seconds)
+                ) as resp:
+                    if resp.status != 200:
+                        raise PortalUnavailableError(f"Portal returned {resp.status} for {self.ASSESSMENT_ENDPOINT}")
+                    html = await resp.text()
+
+                result = parse_assessment_details(html)
+                return result
+
+            except (PortalUnavailableError, PortalAuthenticationError, PortalTimeoutError) as exc:
+                logger.warning(f"Assessment scrape failed: {type(exc).__name__} - {exc}")
+                raise
+            except (PortalError, asyncio.TimeoutError) as exc:
+                logger.error("Assessment scrape failed", exc_info=exc)
+                raise
+            finally:
+                if self.session:
+                    await self.session.close()
 
     def _validate_student_id(self, student_id: str) -> None:
         """
